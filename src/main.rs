@@ -7,14 +7,26 @@ mod store;
 use anyhow::Result;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use time::macros::format_description;
+use tracing::info;
 use warp::Filter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter("waifu=debug,warp=info")
+        .with_timer(tracing_subscriber::fmt::time::LocalTime::new(
+            format_description!("[year]-[month]-[day] [hour]:[minute]:[second]"),
+        ))
+        .init();
+
+    info!("Starting waifu server...");
+
     let config = config::Config::from_env()?;
 
     let images_dir = PathBuf::from("images");
 
+    info!("Initializing image store...");
     let store = store::ImageStore::new(
         "images.db",
         images_dir.clone(),
@@ -44,7 +56,7 @@ async fn main() -> Result<()> {
 
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
 
-    println!("Server started at http://{}:{}", config.host, config.port);
+    info!("Server started at http://{}:{}", config.host, config.port);
     warp::serve(routes).run(addr).await;
 
     Ok(())

@@ -3,6 +3,7 @@ use anyhow::Result;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use std::path::PathBuf;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 pub struct ImageStore {
@@ -19,10 +20,12 @@ impl ImageStore {
         port: u16,
         images_path: String,
     ) -> Result<Self> {
+        info!("Initializing ImageStore with database at {}", db_path);
         let manager = SqliteConnectionManager::file(db_path);
         let pool = Pool::new(manager)?;
 
         std::fs::create_dir_all(&images_dir)?;
+        info!("Ensuring images directory exists at {:?}", images_dir);
 
         let conn = pool.get()?;
         conn.execute(
@@ -39,6 +42,7 @@ impl ImageStore {
             base_url: format!("http://{}:{}{}", host, port, images_path),
         };
 
+        info!("Syncing database with existing images...");
         store.sync_database()?;
 
         Ok(store)
@@ -46,20 +50,24 @@ impl ImageStore {
 
     fn sync_database(&self) -> Result<()> {
         let conn = self.pool.get()?;
-
         let entries = std::fs::read_dir(&self.images_dir)?;
+        let mut count = 0;
 
         for entry in entries {
             let entry = entry?;
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
 
-            conn.execute(
+            match conn.execute(
                 "INSERT OR IGNORE INTO images (filename) VALUES (?)",
                 [filename_str.as_ref()],
-            )?;
+            ) {
+                Ok(_) => count += 1,
+                Err(e) => warn!("Failed to sync file {}: {}", filename_str, e),
+            }
         }
 
+        info!("Synced {} images with database", count);
         Ok(())
     }
 

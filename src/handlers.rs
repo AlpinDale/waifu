@@ -101,6 +101,7 @@ pub async fn get_image_by_filename_handler(
 }
 
 pub async fn generate_api_key_handler(
+    _: (),
     store: ImageStore,
     body: GenerateApiKeyRequest,
 ) -> Result<impl Reply, Rejection> {
@@ -131,6 +132,7 @@ pub async fn generate_api_key_handler(
 }
 
 pub async fn remove_api_key_handler(
+    _: (),
     store: ImageStore,
     body: RemoveApiKeyRequest,
 ) -> Result<impl Reply, Rejection> {
@@ -157,7 +159,7 @@ pub async fn remove_api_key_handler(
     }
 }
 
-pub async fn list_api_keys_handler(store: ImageStore) -> Result<impl Reply, Rejection> {
+pub async fn list_api_keys_handler(_: (), store: ImageStore) -> Result<impl Reply, Rejection> {
     match store.list_api_keys() {
         Ok(keys) => {
             info!("Listed {} API keys", keys.len());

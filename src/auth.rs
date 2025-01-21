@@ -28,13 +28,11 @@ impl Auth {
         }
     }
 
-    pub fn require_admin(&self) -> impl Filter<Extract = (), Error = Rejection> + Clone {
+    pub fn require_admin(&self) -> impl Filter<Extract = ((),), Error = Rejection> + Clone {
         let auth = self.clone();
-        warp::header::optional::<String>("authorization")
-            .and_then(move |header: Option<String>| {
-                let auth = auth.clone();
-                async move { auth.check_admin(header).map(|_| ((),)) }
-            })
-            .map(|_| ())
+        warp::header::optional::<String>("authorization").and_then(move |header: Option<String>| {
+            let auth = auth.clone();
+            async move { auth.check_admin(header) }
+        })
     }
 }

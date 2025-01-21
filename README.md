@@ -25,4 +25,6 @@ curl http://localhost:8000/random
 
 ## Configuration
 
-We use dotenv to manage configuration. Copy `.env_example` to `.env` and set the variables as needed.
+```sh
+cargo run -- --host 0.0.0.0 --port 8000 --images-path /images
+```

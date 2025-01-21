@@ -25,7 +25,7 @@ pub async fn add_image_handler(
     body: AddImageRequest,
 ) -> Result<impl Reply, Rejection> {
     info!("Adding new image from {}", body.path);
-    match store.add_image(&body.path, body.path_type) {
+    match store.add_image(&body.path, body.path_type).await {
         Ok(_) => {
             info!("Successfully added image from {}", body.path);
             Ok(warp::reply::with_status(

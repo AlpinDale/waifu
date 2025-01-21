@@ -1,17 +1,58 @@
 use crate::models::{ImageResponse, PathType};
 use anyhow::{anyhow, Result};
+use futures_util::StreamExt;
 use image::{GenericImageView, ImageFormat};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::PathBuf;
+use std::time::Duration;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use tokio::io::AsyncWriteExt;
 use tracing::{error, info, warn};
+use url::Url;
 use uuid::Uuid;
 
 const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10 MiB
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_REDIRECTS: u32 = 5;
+
+// Allowed content types for images
+const ALLOWED_CONTENT_TYPES: [&str; 7] = [
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+    "image/x-ms-bmp",      // Some servers use this for BMP
+    "binary/octet-stream", // Some servers don't set proper content type
+];
+
+const BLOCKED_URL_PATTERNS: [&str; 12] = [
+    "localhost",
+    "127.",
+    "0.0.0.0",
+    // Private network ranges (RFC 1918)
+    "10.",
+    "172.16.",
+    "172.17.",
+    "172.18.",
+    "172.19.",
+    "172.20.",
+    "172.21.",
+    "192.168.",
+    // Link-local addresses (RFC 3927)
+    "169.254.",
+];
+
+const BLOCKED_HOSTNAMES: [&str; 4] = [
+    "metadata.google.internal",     // Google Cloud
+    "169.254.169.254",              // AWS
+    "metadata.azure.internal",      // Azure
+    "metadata.platformequinix.com", // Equinix Metal
+];
 
 pub struct ImageStore {
     pool: Pool<SqliteConnectionManager>,
@@ -132,7 +173,122 @@ impl ImageStore {
         })
     }
 
-    pub fn add_image(&self, path: &str, path_type: PathType) -> Result<()> {
+    async fn validate_url(&self, url: &str) -> Result<Url> {
+        let parsed_url = Url::parse(url).map_err(|e| anyhow!("Invalid URL: {}", e))?;
+
+        if !["http", "https"].contains(&parsed_url.scheme()) {
+            return Err(anyhow!("Only HTTP(S) URLs are supported"));
+        }
+
+        let host_str = parsed_url.host_str().unwrap_or_default();
+
+        for pattern in BLOCKED_URL_PATTERNS {
+            if host_str.contains(pattern) {
+                return Err(anyhow!("URL contains blocked pattern: {}", pattern));
+            }
+        }
+
+        for hostname in BLOCKED_HOSTNAMES {
+            if host_str.eq_ignore_ascii_case(hostname) {
+                return Err(anyhow!("URL hostname is blocked: {}", hostname));
+            }
+        }
+
+        if let Some(port) = parsed_url.port() {
+            match port {
+                22 | 23 | 25 | 445 | 3306 | 5432 | 27017 => {
+                    return Err(anyhow!("Port {} is not allowed", port));
+                }
+                _ => {}
+            }
+        }
+
+        Ok(parsed_url)
+    }
+
+    async fn check_content_type(&self, client: &reqwest::Client, url: &Url) -> Result<()> {
+        info!("Checking content type for URL: {}", url);
+
+        let response = client.head(url.as_str()).send().await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!("URL returned status code: {}", response.status()));
+        }
+
+        if let Some(length) = response.content_length() {
+            if length > MAX_FILE_SIZE {
+                return Err(anyhow!(
+                    "File too large: {} bytes (max {} bytes)",
+                    length,
+                    MAX_FILE_SIZE
+                ));
+            }
+            info!("Content length: {} bytes", length);
+        }
+
+        if let Some(content_type) = response.headers().get("content-type") {
+            let content_type = content_type
+                .to_str()
+                .map_err(|_| anyhow!("Invalid content type header"))?
+                .to_lowercase();
+
+            if !ALLOWED_CONTENT_TYPES
+                .iter()
+                .any(|&t| content_type.contains(t))
+            {
+                return Err(anyhow!("Unsupported content type: {}", content_type));
+            }
+            info!("Content type: {}", content_type);
+        } else {
+            warn!("No content type header present");
+        }
+
+        Ok(())
+    }
+
+    async fn download_image(&self, url: &str) -> Result<PathBuf> {
+        let url = self.validate_url(url).await?;
+
+        let client = reqwest::Client::builder()
+            .timeout(DOWNLOAD_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS as usize))
+            .build()?;
+
+        self.check_content_type(&client, &url).await?;
+
+        let temp_path = self.images_dir.join(format!("temp_{}", Uuid::new_v4()));
+        info!("Downloading to temporary file: {:?}", temp_path);
+
+        let response = client.get(url.as_str()).send().await?;
+
+        let mut file = tokio::fs::File::create(&temp_path).await?;
+        let mut downloaded_size: u64 = 0;
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            downloaded_size += chunk.len() as u64;
+
+            if downloaded_size > MAX_FILE_SIZE {
+                file.shutdown().await?;
+                tokio::fs::remove_file(&temp_path).await?;
+                return Err(anyhow!(
+                    "File too large: {} bytes (max {} bytes)",
+                    downloaded_size,
+                    MAX_FILE_SIZE
+                ));
+            }
+
+            file.write_all(&chunk).await?;
+        }
+
+        file.shutdown().await?;
+        info!("Download completed: {} bytes", downloaded_size);
+
+        Ok(temp_path)
+    }
+
+    pub async fn add_image(&self, path: &str, path_type: PathType) -> Result<()> {
         match path_type {
             PathType::Local => {
                 let src_path = std::path::Path::new(path);
@@ -227,8 +383,76 @@ impl ImageStore {
                 }
             }
             PathType::Url => {
-                error!("URL support not implemented yet");
-                return Err(anyhow!("URL support not implemented yet"));
+                info!("Processing URL: {}", path);
+                let temp_path = self.download_image(path).await?;
+
+                // Validate image format
+                info!("Checking image format...");
+                let format = image::io::Reader::new(std::io::BufReader::new(std::fs::File::open(
+                    &temp_path,
+                )?))
+                .with_guessed_format()?
+                .format();
+
+                let format = match format {
+                    Some(fmt) => match fmt {
+                        ImageFormat::Png
+                        | ImageFormat::Jpeg
+                        | ImageFormat::Gif
+                        | ImageFormat::WebP
+                        | ImageFormat::Bmp => {
+                            info!("Detected image format: {:?}", fmt);
+                            fmt
+                        }
+                        unsupported => {
+                            tokio::fs::remove_file(&temp_path).await?;
+                            error!("Unsupported image format: {:?}", unsupported);
+                            return Err(anyhow!("Unsupported image format: {:?}", unsupported));
+                        }
+                    },
+                    None => {
+                        tokio::fs::remove_file(&temp_path).await?;
+                        error!("Could not determine image format");
+                        return Err(anyhow!("Could not determine image format"));
+                    }
+                };
+
+                let ext = format.extensions_str()[0];
+                let filename = format!("{}.{}", Uuid::new_v4(), ext);
+                let dest_path = self.images_dir.join(&filename);
+
+                tokio::fs::rename(&temp_path, &dest_path).await?;
+
+                info!("Verifying image integrity...");
+                match image::open(&dest_path) {
+                    Ok(img) => {
+                        let dimensions = img.dimensions();
+                        info!(
+                            "Successfully validated image: {} ({}x{} pixels, format: {:?})",
+                            filename, dimensions.0, dimensions.1, format
+                        );
+
+                        let now = OffsetDateTime::now_utc();
+                        let now_str = now.format(&Rfc3339)?;
+                        let hash = Self::calculate_file_hash(&dest_path)?;
+
+                        info!("File hash: {}", hash);
+
+                        let conn = self.pool.get()?;
+                        conn.execute(
+                            "INSERT INTO images (filename, hash, created_at, modified_at) 
+                             VALUES (?, ?, ?, ?)",
+                            [&filename, &hash, &now_str, &now_str],
+                        )?;
+
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!("Failed to validate image: {}", e);
+                        tokio::fs::remove_file(&dest_path).await?;
+                        Err(anyhow!("Invalid image file: {}", e))
+                    }
+                }
             }
         }
     }

@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize)]
 pub struct ImageResponse {
     pub url: String,
+    pub filename: String,
+    pub format: String,
+    pub width: u32,
+    pub height: u32,
+    pub size_bytes: u64,
 }
 
 #[derive(Deserialize)]

@@ -1,10 +1,13 @@
-use crate::models::PathType;
-use anyhow::Result;
+use crate::models::{ImageResponse, PathType};
+use anyhow::{anyhow, Result};
+use image::{GenericImageView, ImageFormat};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use std::path::PathBuf;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
+
+const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10 MiB
 
 pub struct ImageStore {
     pool: Pool<SqliteConnectionManager>,
@@ -71,7 +74,7 @@ impl ImageStore {
         Ok(())
     }
 
-    pub fn get_random_image(&self) -> Result<String> {
+    pub fn get_random_image(&self) -> Result<ImageResponse> {
         let conn = self.pool.get()?;
         let filename: String = conn.query_row(
             "SELECT filename FROM images ORDER BY RANDOM() LIMIT 1",
@@ -79,35 +82,118 @@ impl ImageStore {
             |row| row.get(0),
         )?;
 
-        Ok(format!("{}/{}", self.base_url, filename))
+        let file_path = self.images_dir.join(&filename);
+
+        let metadata = std::fs::metadata(&file_path)?;
+
+        let img = image::open(&file_path)?;
+        let dimensions = img.dimensions();
+
+        let format = file_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_uppercase())
+            .unwrap_or_else(|| "UNKNOWN".to_string());
+
+        Ok(ImageResponse {
+            url: format!("{}/{}", self.base_url, filename),
+            filename,
+            format,
+            width: dimensions.0,
+            height: dimensions.1,
+            size_bytes: metadata.len(),
+        })
     }
 
     pub fn add_image(&self, path: &str, path_type: PathType) -> Result<()> {
         match path_type {
             PathType::Local => {
                 let src_path = std::path::Path::new(path);
+                info!("Validating local file: {}", path);
+
                 if !src_path.exists() {
-                    return Err(anyhow::anyhow!("Local file not found: {}", path));
+                    error!("File not found: {}", path);
+                    return Err(anyhow!("Local file not found: {}", path));
                 }
 
-                let ext = src_path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("png");
+                let metadata = std::fs::metadata(src_path)?;
+                let size_mb = metadata.len() as f64 / 1024.0 / 1024.0;
+                info!("File size: {:.2} MiB", size_mb);
+
+                if metadata.len() > MAX_FILE_SIZE {
+                    error!(
+                        "File too large: {:.2} MiB (max {:.2} MiB)",
+                        size_mb,
+                        MAX_FILE_SIZE as f64 / 1024.0 / 1024.0
+                    );
+                    return Err(anyhow!(
+                        "File too large: {} bytes (max {} bytes)",
+                        metadata.len(),
+                        MAX_FILE_SIZE
+                    ));
+                }
+
+                info!("Checking image format...");
+                let img_file = std::fs::File::open(src_path)?;
+                let format = image::io::Reader::new(std::io::BufReader::new(img_file))
+                    .with_guessed_format()?
+                    .format();
+
+                let format = match format {
+                    Some(fmt) => match fmt {
+                        ImageFormat::Png
+                        | ImageFormat::Jpeg
+                        | ImageFormat::Gif
+                        | ImageFormat::WebP
+                        | ImageFormat::Bmp => {
+                            info!("Detected image format: {:?}", fmt);
+                            fmt
+                        }
+                        unsupported => {
+                            error!("Unsupported image format: {:?}", unsupported);
+                            return Err(anyhow!("Unsupported image format: {:?}", unsupported));
+                        }
+                    },
+                    None => {
+                        error!("Could not determine image format");
+                        return Err(anyhow!("Could not determine image format"));
+                    }
+                };
+
+                let ext = format.extensions_str()[0];
                 let filename = format!("{}.{}", Uuid::new_v4(), ext);
                 let dest_path = self.images_dir.join(&filename);
 
+                info!("Copying file to: {:?}", dest_path);
                 std::fs::copy(path, &dest_path)?;
 
-                let conn = self.pool.get()?;
-                conn.execute("INSERT INTO images (filename) VALUES (?)", [filename])?;
+                info!("Verifying image integrity...");
+                match image::open(&dest_path) {
+                    Ok(img) => {
+                        let dimensions = img.dimensions();
+                        info!(
+                            "Successfully validated image: {} ({}x{} pixels, format: {:?})",
+                            filename, dimensions.0, dimensions.1, format
+                        );
+                        let conn = self.pool.get()?;
+                        conn.execute("INSERT INTO images (filename) VALUES (?)", [filename])?;
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!("Failed to validate image: {}", e);
+                        if dest_path.exists() {
+                            warn!("Cleaning up invalid file: {:?}", dest_path);
+                            let _ = std::fs::remove_file(&dest_path);
+                        }
+                        Err(anyhow!("Invalid image file: {}", e))
+                    }
+                }
             }
             PathType::Url => {
-                return Err(anyhow::anyhow!("URL support not implemented yet"));
+                error!("URL support not implemented yet");
+                return Err(anyhow!("URL support not implemented yet"));
             }
         }
-
-        Ok(())
     }
 }
 

@@ -17,6 +17,7 @@ clap = { version = "4.5", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "time", "local-time"] }
 time = { version = "0.3", features = ["macros", "local-offset"] }
+image = "0.24"
 
 [profile.release]
 opt-level = 3

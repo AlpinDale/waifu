@@ -85,11 +85,34 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y gcc-aarch64-linux-gnu
+        sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
+        sudo apt-get install -y musl-tools
+        wget https://musl.cc/aarch64-linux-musl-cross.tgz
+        tar -xf aarch64-linux-musl-cross.tgz
+        sudo mv aarch64-linux-musl-cross /opt/
+        echo "/opt/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
 
     - name: Build
       run: |
         cargo build --release --target ${{ matrix.target }}
+
+    - name: Install UPX
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" == "Linux" ]; then
+          sudo apt-get install -y upx
+        elif [ "${{ runner.os }}" == "macOS" ]; then
+          brew install upx
+        elif [ "${{ runner.os }}" == "Windows" ]; then
+          choco install upx
+        fi
+
+    - name: Compress Binary with UPX
+      shell: bash
+      run: |
+        if [[ "${{ matrix.target }}" != *"aarch64"* ]]; then
+          upx --ultra-brute target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+        fi
 
     - name: Upload Release Asset
       uses: actions/upload-release-asset@v1

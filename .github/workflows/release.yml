@@ -80,7 +80,12 @@ jobs:
     - name: Build
       shell: bash
       run: |
-        cargo build --release --target ${{ matrix.target }}
+        if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+          cargo build --release --target ${{ matrix.target }}
+        else
+          cargo build --release --target ${{ matrix.target }}
+        fi
 
     - name: Install UPX
       shell: bash

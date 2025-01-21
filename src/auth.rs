@@ -2,7 +2,7 @@ use crate::error::ImageError;
 use crate::limiter::ApiKeyRateLimiter;
 use crate::store::ImageStore;
 use std::sync::Arc;
-use tracing::error;
+use tracing::warn;
 use warp::{Filter, Rejection};
 
 #[derive(Clone)]
@@ -30,17 +30,25 @@ impl Auth {
             Some(header) if header.starts_with("Bearer ") => {
                 let key = header.trim_start_matches("Bearer ").trim();
 
+                // admin is almighty and we don't track usage
+                if key == self.admin_key.as_str() {
+                    return Ok(());
+                }
+
                 if !self.rate_limiter.check_rate_limit(key).await {
-                    error!(
+                    warn!(
                         api_key = %Self::truncate_key(key),
                         "Rate limit exceeded for API key"
                     );
                     return Err(warp::reject::custom(ImageError::RateLimitExceeded));
                 }
 
-                // admin is almighty
-                if key == self.admin_key.as_str() {
-                    return Ok(());
+                if let Err(e) = self.store.update_key_last_used(key) {
+                    warn!(
+                        api_key = %Self::truncate_key(key),
+                        error = %e,
+                        "Failed to update last_used_at timestamp"
+                    );
                 }
 
                 match self.store.validate_api_key(key) {

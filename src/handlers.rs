@@ -1,6 +1,8 @@
 use crate::cache::ImageCache;
 use crate::error::ImageError;
-use crate::models::{AddImageRequest, GenerateApiKeyRequest, RemoveApiKeyRequest};
+use crate::models::{
+    AddImageRequest, GenerateApiKeyRequest, RemoveApiKeyRequest, UpdateApiKeyRequest,
+};
 use crate::store::ImageStore;
 use serde_json::json;
 use tracing::{error, info};
@@ -92,13 +94,19 @@ pub async fn generate_api_key_handler(
     store: ImageStore,
     body: GenerateApiKeyRequest,
 ) -> Result<impl Reply, Rejection> {
-    match store.generate_api_key(&body.username) {
+    match store.generate_api_key(&body.username, body.requests_per_second) {
         Ok(api_key) => {
-            info!("Generated API key for user: {}", body.username);
+            info!(
+                username = %body.username,
+                rate_limit = ?body.requests_per_second,
+                "Generated new API key"
+            );
             Ok(warp::reply::with_status(
                 warp::reply::json(&json!({
                     "username": body.username,
-                    "api_key": api_key
+                    "api_key": api_key,
+                    "rate_limit": body.requests_per_second.map(|r| format!("{} requests/second", r))
+                        .unwrap_or_else(|| "unlimited".to_string())
                 })),
                 warp::http::StatusCode::CREATED,
             ))
@@ -144,6 +152,38 @@ pub async fn list_api_keys_handler(_: (), store: ImageStore) -> Result<impl Repl
         }
         Err(e) => {
             error!("Failed to list API keys: {}", e);
+            Err(warp::reject::custom(ImageError::DatabaseError(
+                e.to_string(),
+            )))
+        }
+    }
+}
+
+pub async fn update_api_key_handler(
+    username: String,
+    _: (), // Admin auth result
+    store: ImageStore,
+    body: UpdateApiKeyRequest,
+) -> Result<impl Reply, Rejection> {
+    match store.update_api_key_rate_limit(&username, body.requests_per_second) {
+        Ok(()) => {
+            info!(
+                username = %username,
+                new_rate_limit = ?body.requests_per_second,
+                "Updated API key rate limit"
+            );
+            Ok(warp::reply::with_status(
+                warp::reply::json(&json!({
+                    "message": "API key updated successfully",
+                    "username": username,
+                    "rate_limit": body.requests_per_second.map(|r| format!("{} requests/second", r))
+                        .unwrap_or_else(|| "unlimited".to_string())
+                })),
+                warp::http::StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            error!("Failed to update API key: {}", e);
             Err(warp::reject::custom(ImageError::DatabaseError(
                 e.to_string(),
             )))

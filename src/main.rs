@@ -37,13 +37,6 @@ async fn main() -> Result<()> {
 
     let config = config::Config::from_env()?;
 
-    let rate_limiter = ApiKeyRateLimiter::new(
-        config.rate_limit_requests,
-        Duration::seconds(config.rate_limit_window_secs as i64),
-    );
-
-    let cache = ImageCache::new(config.cache_size, config.cache_ttl());
-
     let images_dir = PathBuf::from("images");
 
     info!("Initializing image store...");
@@ -54,6 +47,14 @@ async fn main() -> Result<()> {
         config.port,
         config.images_path.clone(),
     )?;
+
+    let rate_limiter = ApiKeyRateLimiter::new(
+        store.clone(),
+        config.rate_limit_requests,
+        Duration::seconds(config.rate_limit_window_secs as i64),
+    );
+
+    let cache = ImageCache::new(config.cache_size, config.cache_ttl());
 
     let auth = Auth::new(config.admin_key, store.clone(), rate_limiter);
 
@@ -148,12 +149,20 @@ async fn main() -> Result<()> {
                 handlers::list_api_keys_handler(args.0, args.1).await
             }));
 
-    let routes = health
+    let update_api_key = warp::path!("api-keys" / String)
+        .and(warp::put())
+        .and(auth.require_admin())
+        .and(store.clone())
+        .and(warp::body::json())
+        .and_then(handlers::update_api_key_handler);
+
+    let api = health
         .or(random)
         .or(add_image)
         .or(images)
         .or(image)
         .or(api_key_routes)
+        .or(update_api_key)
         .or(warp::options()
             .and(warp::path::full())
             .map(|_| warp::reply()))
@@ -163,7 +172,7 @@ async fn main() -> Result<()> {
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
 
     info!("Server started at http://{}:{}", config.host, config.port);
-    warp::serve(routes).run(addr).await;
+    warp::serve(api).run(addr).await;
 
     Ok(())
 }

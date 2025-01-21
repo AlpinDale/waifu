@@ -4,6 +4,7 @@ use futures_util::StreamExt;
 use image::{GenericImageView, ImageFormat};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::{params, Error as SqliteError};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::PathBuf;
@@ -76,6 +77,8 @@ impl ImageStore {
         info!("Ensuring images directory exists at {:?}", images_dir);
 
         let conn = pool.get()?;
+
+        // Create tables if they don't exist
         conn.execute(
             "CREATE TABLE IF NOT EXISTS images (
                 hash TEXT PRIMARY KEY,
@@ -86,6 +89,7 @@ impl ImageStore {
             [],
         )?;
 
+        // First create the api_keys table if it doesn't exist
         conn.execute(
             "CREATE TABLE IF NOT EXISTS api_keys (
                 key TEXT PRIMARY KEY,
@@ -96,6 +100,21 @@ impl ImageStore {
             )",
             [],
         )?;
+
+        // Then add the requests_per_second column if it doesn't exist
+        let columns = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('api_keys') WHERE name='requests_per_second'",
+            [],
+            |row| row.get::<_, i32>(0),
+        )?;
+
+        if columns == 0 {
+            info!("Adding requests_per_second column to api_keys table");
+            conn.execute(
+                "ALTER TABLE api_keys ADD COLUMN requests_per_second INTEGER",
+                [],
+            )?;
+        }
 
         let store = Self {
             pool,
@@ -501,15 +520,19 @@ impl ImageStore {
         })
     }
 
-    pub fn generate_api_key(&self, username: &str) -> Result<String> {
+    pub fn generate_api_key(
+        &self,
+        username: &str,
+        requests_per_second: Option<u32>,
+    ) -> Result<String> {
         let conn = self.pool.get()?;
 
         let api_key = Uuid::new_v4().to_string();
         let now = OffsetDateTime::now_utc().format(&Rfc3339)?;
 
         conn.execute(
-            "INSERT INTO api_keys (key, username, created_at) VALUES (?, ?, ?)",
-            [&api_key, username, &now],
+            "INSERT INTO api_keys (key, username, created_at, requests_per_second) VALUES (?, ?, ?, ?)",
+            params![&api_key, username, &now, requests_per_second],
         )?;
 
         Ok(api_key)
@@ -524,7 +547,7 @@ impl ImageStore {
     pub fn list_api_keys(&self) -> Result<Vec<ApiKey>> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(
-            "SELECT key, username, created_at, last_used_at, is_active 
+            "SELECT key, username, created_at, last_used_at, is_active, requests_per_second 
              FROM api_keys 
              ORDER BY created_at DESC",
         )?;
@@ -534,13 +557,25 @@ impl ImageStore {
                 let created_at_str: String = row.get(2)?;
                 let last_used_at_str: Option<String> = row.get(3)?;
 
-                let created_at = OffsetDateTime::parse(&created_at_str, &Rfc3339)
-                    .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+                let created_at = OffsetDateTime::parse(&created_at_str, &Rfc3339).map_err(|e| {
+                    SqliteError::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })?;
 
-                let last_used_at = last_used_at_str
-                    .map(|dt| OffsetDateTime::parse(&dt, &Rfc3339))
-                    .transpose()
-                    .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+                let last_used_at = if let Some(dt_str) = last_used_at_str {
+                    Some(OffsetDateTime::parse(&dt_str, &Rfc3339).map_err(|e| {
+                        SqliteError::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?)
+                } else {
+                    None
+                };
 
                 Ok(ApiKey {
                     key: row.get(0)?,
@@ -548,6 +583,7 @@ impl ImageStore {
                     created_at,
                     last_used_at,
                     is_active: row.get(4)?,
+                    requests_per_second: row.get(5)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -564,6 +600,80 @@ impl ImageStore {
         )?;
 
         Ok(count > 0)
+    }
+
+    pub fn get_api_key(&self, key: &str) -> Result<ApiKey> {
+        let conn = self.pool.get()?;
+        let result = conn.query_row(
+            "SELECT key, username, created_at, last_used_at, is_active, requests_per_second FROM api_keys WHERE key = ?",
+            [key],
+            |row| {
+                let created_at_str: String = row.get(2)?;
+                let last_used_at_str: Option<String> = row.get(3)?;
+
+                let created_at = OffsetDateTime::parse(&created_at_str, &Rfc3339)
+                    .map_err(|e| SqliteError::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    ))?;
+
+                let last_used_at = if let Some(dt_str) = last_used_at_str {
+                    Some(OffsetDateTime::parse(&dt_str, &Rfc3339)
+                        .map_err(|e| SqliteError::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        ))?)
+                } else {
+                    None
+                };
+
+                Ok(ApiKey {
+                    key: row.get(0)?,
+                    username: row.get(1)?,
+                    created_at,
+                    last_used_at,
+                    is_active: row.get(4)?,
+                    requests_per_second: row.get(5)?,
+                })
+            },
+        )?;
+        Ok(result)
+    }
+
+    pub fn update_key_last_used(&self, key: &str) -> Result<()> {
+        let conn = self.pool.get()?;
+        let now = OffsetDateTime::now_utc().format(&Rfc3339)?;
+
+        conn.execute(
+            "UPDATE api_keys SET last_used_at = ? WHERE key = ?",
+            params![now, key],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn update_api_key_rate_limit(
+        &self,
+        username: &str,
+        requests_per_second: Option<u32>,
+    ) -> Result<()> {
+        let conn = self.pool.get()?;
+
+        let rows_affected = conn.execute(
+            "UPDATE api_keys SET requests_per_second = ? WHERE username = ? AND is_active = 1",
+            params![requests_per_second, username],
+        )?;
+
+        if rows_affected == 0 {
+            return Err(anyhow!(
+                "No active API key found for username: {}",
+                username
+            ));
+        }
+
+        Ok(())
     }
 }
 

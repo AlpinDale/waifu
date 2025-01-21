@@ -30,7 +30,23 @@ pub enum PathType {
     Local,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
+pub struct GenerateApiKeyRequest {
+    pub username: String,
+    pub requests_per_second: Option<u32>, // none = unlimited
+}
+
+#[derive(Deserialize)]
+pub struct RemoveApiKeyRequest {
+    pub username: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateApiKeyRequest {
+    pub requests_per_second: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ApiKey {
     pub key: String,
     pub username: String,
@@ -39,14 +55,5 @@ pub struct ApiKey {
     #[serde(with = "time::serde::rfc3339::option")]
     pub last_used_at: Option<OffsetDateTime>,
     pub is_active: bool,
-}
-
-#[derive(Deserialize)]
-pub struct GenerateApiKeyRequest {
-    pub username: String,
-}
-
-#[derive(Deserialize)]
-pub struct RemoveApiKeyRequest {
-    pub username: String,
+    pub requests_per_second: Option<u32>,
 }

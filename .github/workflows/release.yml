@@ -42,16 +42,6 @@ jobs:
             target: aarch64-unknown-linux-gnu
             artifact_name: waifu
             asset_name: waifu-aarch64-linux-gnu
-          # Linux x86_64 MUSL
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            artifact_name: waifu
-            asset_name: waifu-x86_64-linux-musl
-          # Linux aarch64 MUSL
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            artifact_name: waifu
-            asset_name: waifu-aarch64-linux-musl
           # macOS x86_64
           - os: macos-latest
             target: x86_64-apple-darwin
@@ -85,22 +75,12 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
-        sudo apt-get install -y musl-tools
-        wget https://musl.cc/aarch64-linux-musl-cross.tgz
-        tar -xf aarch64-linux-musl-cross.tgz
-        sudo mv aarch64-linux-musl-cross /opt/
-        echo "/opt/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+        sudo apt-get install -y gcc-aarch64-linux-gnu
 
     - name: Build
       shell: bash
       run: |
-        if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=/opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc \
-          cargo build --release --target ${{ matrix.target }}
-        else
-          cargo build --release --target ${{ matrix.target }}
-        fi
+        cargo build --release --target ${{ matrix.target }}
 
     - name: Install UPX
       shell: bash

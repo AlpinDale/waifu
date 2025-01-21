@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap::Parser;
 use std::time::Duration;
 
@@ -25,11 +25,18 @@ pub struct Config {
 
     #[arg(long, env = "CACHE_TTL_SECS", default_value = "300")]
     pub cache_ttl_secs: u64,
+
+    #[arg(long, env = "ADMIN_KEY")]
+    pub admin_key: String,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        Ok(Self::parse())
+        let config = Self::parse();
+        if config.admin_key.is_empty() {
+            return Err(anyhow!("ADMIN_KEY must be provided"));
+        }
+        Ok(config)
     }
 
     pub fn cache_ttl(&self) -> Duration {

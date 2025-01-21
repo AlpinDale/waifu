@@ -1,3 +1,4 @@
+mod auth;
 mod cache;
 mod config;
 mod error;
@@ -9,6 +10,7 @@ mod store;
 use crate::cache::ImageCache;
 use crate::limiter::IpRateLimiter;
 use anyhow::Result;
+use auth::Auth;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use time::macros::format_description;
@@ -75,18 +77,23 @@ async fn main() -> Result<()> {
         .and(warp::filters::header::headers_cloned())
         .and_then(handlers::get_image_by_filename_handler);
 
+    let auth = Auth::new(config.admin_key);
+
     let api_key_routes = warp::path("api-keys")
         .and(warp::post())
+        .and(auth.require_admin())
         .and(store.clone())
         .and(warp::body::json())
         .and_then(handlers::generate_api_key_handler)
         .or(warp::path("api-keys")
             .and(warp::delete())
+            .and(auth.require_admin())
             .and(store.clone())
             .and(warp::body::json())
             .and_then(handlers::remove_api_key_handler))
         .or(warp::path("api-keys")
             .and(warp::get())
+            .and(auth.require_admin())
             .and(store.clone())
             .and_then(handlers::list_api_keys_handler));
 

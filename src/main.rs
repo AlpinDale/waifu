@@ -1,18 +1,27 @@
+mod config;
 mod error;
 mod handlers;
 mod models;
 mod store;
 
 use anyhow::Result;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use warp::Filter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let images_dir = PathBuf::from("images");
-    let base_url = "http://localhost:8000/images";
+    let config = config::Config::from_env()?;
 
-    let store = store::ImageStore::new("images.db", images_dir.clone(), base_url.to_string())?;
+    let images_dir = PathBuf::from("images");
+
+    let store = store::ImageStore::new(
+        "images.db",
+        images_dir.clone(),
+        config.host.clone(),
+        config.port,
+        config.images_path.clone(),
+    )?;
     let store = warp::any().map(move || store.clone());
 
     let random = warp::path("random")
@@ -33,8 +42,10 @@ async fn main() -> Result<()> {
         .or(images)
         .recover(error::handle_rejection);
 
-    println!("Server started at http://localhost:8000");
-    warp::serve(routes).run(([127, 0, 0, 1], 8000)).await;
+    let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
+
+    println!("Server started at http://{}:{}", config.host, config.port);
+    warp::serve(routes).run(addr).await;
 
     Ok(())
 }

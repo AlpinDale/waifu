@@ -12,7 +12,13 @@ pub struct ImageStore {
 }
 
 impl ImageStore {
-    pub fn new(db_path: &str, images_dir: PathBuf, base_url: String) -> Result<Self> {
+    pub fn new(
+        db_path: &str,
+        images_dir: PathBuf,
+        host: String,
+        port: u16,
+        images_path: String,
+    ) -> Result<Self> {
         let manager = SqliteConnectionManager::file(db_path);
         let pool = Pool::new(manager)?;
 
@@ -30,7 +36,7 @@ impl ImageStore {
         let store = Self {
             pool,
             images_dir,
-            base_url,
+            base_url: format!("http://{}:{}{}", host, port, images_path),
         };
 
         store.sync_database()?;

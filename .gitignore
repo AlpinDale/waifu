@@ -20,4 +20,7 @@ target/
 
 # sqlite database
 *.db
+
+# waifu-specific
 images/
+.env

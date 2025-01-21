@@ -1,3 +1,4 @@
+mod auth;
 mod cache;
 mod config;
 mod error;
@@ -5,12 +6,11 @@ mod handlers;
 mod limiter;
 mod models;
 mod store;
-mod auth;
 
 use crate::cache::ImageCache;
 use crate::limiter::IpRateLimiter;
-use auth::Auth;
 use anyhow::Result;
+use auth::Auth;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use time::macros::format_description;

@@ -556,6 +556,17 @@ impl ImageStore {
 
         Ok(keys)
     }
+
+    pub fn validate_api_key(&self, key: &str) -> Result<bool> {
+        let conn = self.pool.get()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM api_keys WHERE key = ? AND is_active = 1",
+            [key],
+            |row| row.get(0),
+        )?;
+
+        Ok(count > 0)
+    }
 }
 
 impl Clone for ImageStore {

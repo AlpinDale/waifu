@@ -50,7 +50,7 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
             ),
             ImageError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
-                "Invalid or missing admin key".to_string(),
+                "Invalid or missing API key".to_string(),
             ),
         }
     } else {

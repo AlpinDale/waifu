@@ -9,12 +9,15 @@ mod store;
 
 use crate::cache::ImageCache;
 use crate::limiter::IpRateLimiter;
+use crate::models::{AddImageRequest, GenerateApiKeyRequest, RemoveApiKeyRequest};
+use crate::store::ImageStore;
 use anyhow::Result;
 use auth::Auth;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use time::macros::format_description;
 use tracing::info;
+use warp::http::HeaderMap;
 use warp::Filter;
 
 #[tokio::main]
@@ -45,12 +48,11 @@ async fn main() -> Result<()> {
         config.port,
         config.images_path.clone(),
     )?;
+
+    let auth = Auth::new(config.admin_key, store.clone());
+
     let store = warp::any().map(move || store.clone());
-
-    let cache = cache.clone();
     let cache = warp::any().map(move || cache.clone());
-
-    let rate_limiter = rate_limiter.clone();
     let rate_limiter = warp::any().map(move || rate_limiter.clone());
 
     let random = warp::path("random")
@@ -59,13 +61,23 @@ async fn main() -> Result<()> {
         .and(cache.clone())
         .and(rate_limiter.clone())
         .and(warp::filters::header::headers_cloned())
-        .and_then(handlers::get_random_image_handler);
+        .and(auth.require_auth())
+        .map(|store, cache, limiter, headers, ()| (store, cache, limiter, headers))
+        .and_then(
+            |args: (ImageStore, ImageCache, IpRateLimiter, HeaderMap)| async move {
+                handlers::get_random_image_handler(args.0, args.1, args.2, args.3).await
+            },
+        );
 
     let add_image = warp::path("image")
         .and(warp::post())
         .and(store.clone())
         .and(warp::body::json())
-        .and_then(handlers::add_image_handler);
+        .and(auth.require_auth())
+        .map(|store, body, ()| (store, body))
+        .and_then(|args: (ImageStore, AddImageRequest)| async move {
+            handlers::add_image_handler(args.0, args.1).await
+        });
 
     let images = warp::path("images").and(warp::fs::dir("images"));
 
@@ -75,27 +87,43 @@ async fn main() -> Result<()> {
         .and(cache.clone())
         .and(rate_limiter.clone())
         .and(warp::filters::header::headers_cloned())
-        .and_then(handlers::get_image_by_filename_handler);
-
-    let auth = Auth::new(config.admin_key);
+        .and(auth.require_auth())
+        .map(|filename, store, cache, limiter, headers, ()| {
+            (filename, store, cache, limiter, headers)
+        })
+        .and_then(
+            |args: (String, ImageStore, ImageCache, IpRateLimiter, HeaderMap)| async move {
+                handlers::get_image_by_filename_handler(args.0, args.1, args.2, args.3, args.4)
+                    .await
+            },
+        );
 
     let api_key_routes = warp::path("api-keys")
         .and(warp::post())
-        .and(auth.require_admin())
         .and(store.clone())
         .and(warp::body::json())
-        .and_then(handlers::generate_api_key_handler)
+        .and(auth.require_admin())
+        .map(|store, body, ()| ((), store, body))
+        .and_then(|args: ((), ImageStore, GenerateApiKeyRequest)| async move {
+            handlers::generate_api_key_handler(args.0, args.1, args.2).await
+        })
         .or(warp::path("api-keys")
             .and(warp::delete())
-            .and(auth.require_admin())
             .and(store.clone())
             .and(warp::body::json())
-            .and_then(handlers::remove_api_key_handler))
+            .and(auth.require_admin())
+            .map(|store, body, ()| ((), store, body))
+            .and_then(|args: ((), ImageStore, RemoveApiKeyRequest)| async move {
+                handlers::remove_api_key_handler(args.0, args.1, args.2).await
+            }))
         .or(warp::path("api-keys")
             .and(warp::get())
-            .and(auth.require_admin())
             .and(store.clone())
-            .and_then(handlers::list_api_keys_handler));
+            .and(auth.require_admin())
+            .map(|store, ()| ((), store))
+            .and_then(|args: ((), ImageStore)| async move {
+                handlers::list_api_keys_handler(args.0, args.1).await
+            }));
 
     let routes = random
         .or(add_image)

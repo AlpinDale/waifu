@@ -8,7 +8,7 @@ mod models;
 mod store;
 
 use crate::cache::ImageCache;
-use crate::limiter::IpRateLimiter;
+use crate::limiter::ApiKeyRateLimiter;
 use crate::models::{AddImageRequest, GenerateApiKeyRequest, RemoveApiKeyRequest};
 use crate::store::ImageStore;
 use anyhow::Result;
@@ -18,6 +18,7 @@ use serde_json;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use time::macros::format_description;
+use time::Duration;
 use tracing::info;
 use warp::cors::Cors;
 use warp::http::HeaderMap;
@@ -36,8 +37,10 @@ async fn main() -> Result<()> {
 
     let config = config::Config::from_env()?;
 
-    let rate_limiter =
-        IpRateLimiter::new(config.rate_limit_requests, config.rate_limit_window_secs);
+    let rate_limiter = ApiKeyRateLimiter::new(
+        config.rate_limit_requests,
+        Duration::seconds(config.rate_limit_window_secs as i64),
+    );
 
     let cache = ImageCache::new(config.cache_size, config.cache_ttl());
 
@@ -52,11 +55,10 @@ async fn main() -> Result<()> {
         config.images_path.clone(),
     )?;
 
-    let auth = Auth::new(config.admin_key, store.clone());
+    let auth = Auth::new(config.admin_key, store.clone(), rate_limiter);
 
     let store = warp::any().map(move || store.clone());
     let cache = warp::any().map(move || cache.clone());
-    let rate_limiter = warp::any().map(move || rate_limiter.clone());
 
     fn cors() -> Cors {
         warp::cors()
@@ -87,15 +89,12 @@ async fn main() -> Result<()> {
         .and(warp::get())
         .and(store.clone())
         .and(cache.clone())
-        .and(rate_limiter.clone())
         .and(warp::filters::header::headers_cloned())
         .and(auth.require_auth())
-        .map(|store, cache, limiter, headers, ()| (store, cache, limiter, headers))
-        .and_then(
-            |args: (ImageStore, ImageCache, IpRateLimiter, HeaderMap)| async move {
-                handlers::get_random_image_handler(args.0, args.1, args.2, args.3).await
-            },
-        );
+        .map(|store, cache, headers, ()| (store, cache, headers))
+        .and_then(|args: (ImageStore, ImageCache, HeaderMap)| async move {
+            handlers::get_random_image_handler(args.0, args.1, args.2).await
+        });
 
     let add_image = warp::path("image")
         .and(warp::post())
@@ -113,16 +112,12 @@ async fn main() -> Result<()> {
         .and(warp::get())
         .and(store.clone())
         .and(cache.clone())
-        .and(rate_limiter.clone())
         .and(warp::filters::header::headers_cloned())
         .and(auth.require_auth())
-        .map(|filename, store, cache, limiter, headers, ()| {
-            (filename, store, cache, limiter, headers)
-        })
+        .map(|filename, store, cache, headers, ()| (filename, store, cache, headers))
         .and_then(
-            |args: (String, ImageStore, ImageCache, IpRateLimiter, HeaderMap)| async move {
-                handlers::get_image_by_filename_handler(args.0, args.1, args.2, args.3, args.4)
-                    .await
+            |args: (String, ImageStore, ImageCache, HeaderMap)| async move {
+                handlers::get_image_by_filename_handler(args.0, args.1, args.2, args.3).await
             },
         );
 

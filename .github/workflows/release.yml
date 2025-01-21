@@ -93,6 +93,7 @@ jobs:
         echo "/opt/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
 
     - name: Build
+      shell: bash
       run: |
         if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=/opt/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc \

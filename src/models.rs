@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 
 #[derive(Serialize)]
 pub struct ImageResponse {
@@ -8,6 +9,11 @@ pub struct ImageResponse {
     pub width: u32,
     pub height: u32,
     pub size_bytes: u64,
+    pub hash: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub modified_at: OffsetDateTime,
 }
 
 #[derive(Deserialize)]

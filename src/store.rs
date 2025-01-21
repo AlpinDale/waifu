@@ -3,7 +3,11 @@ use anyhow::{anyhow, Result};
 use image::{GenericImageView, ImageFormat};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
+use sha2::{Digest, Sha256};
+use std::io::Read;
 use std::path::PathBuf;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -34,7 +38,10 @@ impl ImageStore {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS images (
                 id INTEGER PRIMARY KEY,
-                filename TEXT NOT NULL UNIQUE
+                filename TEXT NOT NULL UNIQUE,
+                hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                modified_at TEXT NOT NULL
             )",
             [],
         )?;
@@ -74,12 +81,29 @@ impl ImageStore {
         Ok(())
     }
 
+    fn calculate_file_hash(path: &std::path::Path) -> Result<String> {
+        let mut file = std::fs::File::open(path)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0; 1024];
+
+        loop {
+            let bytes_read = file.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..bytes_read]);
+        }
+
+        Ok(format!("{:x}", hasher.finalize()))
+    }
+
     pub fn get_random_image(&self) -> Result<ImageResponse> {
         let conn = self.pool.get()?;
-        let filename: String = conn.query_row(
-            "SELECT filename FROM images ORDER BY RANDOM() LIMIT 1",
+        let (filename, hash, created_at, modified_at): (String, String, String, String) = conn
+            .query_row(
+            "SELECT filename, hash, created_at, modified_at FROM images ORDER BY RANDOM() LIMIT 1",
             [],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )?;
 
         let file_path = self.images_dir.join(&filename);
@@ -102,6 +126,9 @@ impl ImageStore {
             width: dimensions.0,
             height: dimensions.1,
             size_bytes: metadata.len(),
+            hash,
+            created_at: OffsetDateTime::parse(&created_at, &Rfc3339)?,
+            modified_at: OffsetDateTime::parse(&modified_at, &Rfc3339)?,
         })
     }
 
@@ -175,8 +202,18 @@ impl ImageStore {
                             "Successfully validated image: {} ({}x{} pixels, format: {:?})",
                             filename, dimensions.0, dimensions.1, format
                         );
+                        let now = OffsetDateTime::now_utc();
+                        let now_str = now.format(&Rfc3339)?;
+                        let hash = Self::calculate_file_hash(&dest_path)?;
+
+                        info!("File hash: {}", hash);
+
                         let conn = self.pool.get()?;
-                        conn.execute("INSERT INTO images (filename) VALUES (?)", [filename])?;
+                        conn.execute(
+                            "INSERT INTO images (filename, hash, created_at, modified_at) 
+                             VALUES (?, ?, ?, ?)",
+                            [&filename, &hash, &now_str, &now_str],
+                        )?;
                         Ok(())
                     }
                     Err(e) => {

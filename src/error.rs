@@ -1,33 +1,59 @@
+use serde::Serialize;
+use warp::{http::StatusCode, reject::Reject, Rejection, Reply};
+
 #[derive(Debug)]
 pub enum ImageError {
     PathNotFound(String),
     DatabaseError(String),
     InvalidImage(String),
     FileTooLarge(String),
+    RateLimitExceeded,
 }
 
-impl warp::reject::Reject for ImageError {}
+#[derive(Serialize)]
+struct ErrorResponse {
+    code: u16,
+    message: String,
+}
 
-pub async fn handle_rejection(
-    err: warp::Rejection,
-) -> Result<impl warp::Reply, std::convert::Infallible> {
+impl Reject for ImageError {}
+
+pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
     let (code, message) = if err.is_not_found() {
-        (warp::http::StatusCode::NOT_FOUND, "Not Found".to_string())
+        (
+            StatusCode::NOT_FOUND,
+            "The requested resource was not found".to_string(),
+        )
     } else if let Some(e) = err.find::<ImageError>() {
         match e {
-            ImageError::PathNotFound(msg) => (warp::http::StatusCode::BAD_REQUEST, msg.clone()),
-            ImageError::DatabaseError(msg) => {
-                (warp::http::StatusCode::INTERNAL_SERVER_ERROR, msg.clone())
+            ImageError::PathNotFound(msg) => (StatusCode::NOT_FOUND, msg.to_string()),
+            ImageError::DatabaseError(msg) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Database error: {}", msg),
+            ),
+            ImageError::InvalidImage(msg) => {
+                (StatusCode::BAD_REQUEST, format!("Invalid image: {}", msg))
             }
-            ImageError::InvalidImage(msg) => (warp::http::StatusCode::BAD_REQUEST, msg.clone()),
-            ImageError::FileTooLarge(msg) => (warp::http::StatusCode::BAD_REQUEST, msg.clone()),
+            ImageError::FileTooLarge(msg) => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!("File too large: {}", msg),
+            ),
+            ImageError::RateLimitExceeded => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Rate limit exceeded. Please try again later.".to_string(),
+            ),
         }
     } else {
         (
-            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-            "Internal Server Error".to_string(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error".to_string(),
         )
     };
 
-    Ok(warp::reply::with_status(message, code))
+    let json = warp::reply::json(&ErrorResponse {
+        code: code.as_u16(),
+        message,
+    });
+
+    Ok(warp::reply::with_status(json, code))
 }

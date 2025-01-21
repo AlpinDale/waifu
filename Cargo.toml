@@ -4,7 +4,7 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.36", features = ["full", "fs"] }
+tokio = { version = "1.36", features = ["full"] }
 warp = "0.3"
 rusqlite = { version = "0.31", features = ["bundled"] }
 anyhow = "1.0"
@@ -19,9 +19,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "time", "local
 time = { version = "0.3", features = ["macros", "local-offset", "serde", "parsing"] }
 image = "0.24"
 sha2 = "0.10"
-reqwest = { version = "0.11", features = ["stream"] }
+dashmap = "5.5"
+governor = "0.6"
+moka = { version = "0.12", features = ["future"] }
+nonzero_ext = "0.3"
 futures-util = "0.3"
 url = "2.5"
+reqwest = { version = "0.11", features = ["stream"] }
 
 [profile.release]
 opt-level = 3

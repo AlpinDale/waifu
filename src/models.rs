@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct ImageResponse {
     pub url: String,
     pub filename: String,

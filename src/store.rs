@@ -456,6 +456,40 @@ impl ImageStore {
             }
         }
     }
+
+    pub fn get_image_by_filename(&self, filename: &str) -> Result<ImageResponse> {
+        let conn = self.pool.get()?;
+        let (hash, created_at, modified_at): (String, String, String) = conn.query_row(
+            "SELECT hash, created_at, modified_at FROM images WHERE filename = ?",
+            [filename],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+
+        let file_path = self.images_dir.join(filename);
+
+        let metadata = std::fs::metadata(&file_path)?;
+
+        let img = image::open(&file_path)?;
+        let dimensions = img.dimensions();
+
+        let format = file_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_uppercase())
+            .unwrap_or_else(|| "UNKNOWN".to_string());
+
+        Ok(ImageResponse {
+            url: format!("{}/{}", self.base_url, filename),
+            filename: filename.to_string(),
+            format,
+            width: dimensions.0,
+            height: dimensions.1,
+            size_bytes: metadata.len(),
+            hash,
+            created_at: OffsetDateTime::parse(&created_at, &Rfc3339)?,
+            modified_at: OffsetDateTime::parse(&modified_at, &Rfc3339)?,
+        })
+    }
 }
 
 impl Clone for ImageStore {

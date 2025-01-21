@@ -17,6 +17,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use time::macros::format_description;
 use tracing::info;
+use warp::cors::Cors;
 use warp::http::HeaderMap;
 use warp::Filter;
 
@@ -54,6 +55,24 @@ async fn main() -> Result<()> {
     let store = warp::any().map(move || store.clone());
     let cache = warp::any().map(move || cache.clone());
     let rate_limiter = warp::any().map(move || rate_limiter.clone());
+
+    fn cors() -> Cors {
+        warp::cors()
+            .allow_any_origin()
+            .allow_headers(vec![
+                "Authorization",
+                "Content-Type",
+                "User-Agent",
+                "Sec-Fetch-Mode",
+                "Referer",
+                "Origin",
+                "Access-Control-Request-Method",
+                "Access-Control-Request-Headers",
+            ])
+            .allow_methods(vec!["GET", "POST", "DELETE"])
+            .max_age(3600)
+            .build()
+    }
 
     let random = warp::path("random")
         .and(warp::get())
@@ -130,6 +149,10 @@ async fn main() -> Result<()> {
         .or(images)
         .or(image)
         .or(api_key_routes)
+        .or(warp::options()
+            .and(warp::path::full())
+            .map(|_| warp::reply()))
+        .with(cors())
         .recover(error::handle_rejection);
 
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;

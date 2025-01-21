@@ -13,6 +13,8 @@ use crate::models::{AddImageRequest, GenerateApiKeyRequest, RemoveApiKeyRequest}
 use crate::store::ImageStore;
 use anyhow::Result;
 use auth::Auth;
+use chrono;
+use serde_json;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use time::macros::format_description;
@@ -73,6 +75,13 @@ async fn main() -> Result<()> {
             .max_age(3600)
             .build()
     }
+
+    let health = warp::path("health").and(warp::get()).map(|| {
+        warp::reply::json(&serde_json::json!({
+            "status": "ok",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    });
 
     let random = warp::path("random")
         .and(warp::get())
@@ -144,7 +153,8 @@ async fn main() -> Result<()> {
                 handlers::list_api_keys_handler(args.0, args.1).await
             }));
 
-    let routes = random
+    let routes = health
+        .or(random)
         .or(add_image)
         .or(images)
         .or(image)

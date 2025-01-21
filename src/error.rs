@@ -9,6 +9,7 @@ pub enum ImageError {
     FileTooLarge(String),
     RateLimitExceeded,
     UsernameExists(String),
+    Unauthorized,
 }
 
 #[derive(Serialize)]
@@ -46,6 +47,10 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
             ImageError::UsernameExists(username) => (
                 StatusCode::CONFLICT,
                 format!("API key already exists for username: {}", username),
+            ),
+            ImageError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                "Invalid or missing admin key".to_string(),
             ),
         }
     } else {

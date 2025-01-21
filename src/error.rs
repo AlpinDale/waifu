@@ -2,7 +2,6 @@
 pub enum ImageError {
     PathNotFound(String),
     DatabaseError(String),
-    FileError(String),
 }
 
 impl warp::reject::Reject for ImageError {}
@@ -16,9 +15,6 @@ pub async fn handle_rejection(
         match e {
             ImageError::PathNotFound(msg) => (warp::http::StatusCode::BAD_REQUEST, msg.clone()),
             ImageError::DatabaseError(msg) => {
-                (warp::http::StatusCode::INTERNAL_SERVER_ERROR, msg.clone())
-            }
-            ImageError::FileError(msg) => {
                 (warp::http::StatusCode::INTERNAL_SERVER_ERROR, msg.clone())
             }
         }

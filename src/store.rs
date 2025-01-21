@@ -517,10 +517,8 @@ impl ImageStore {
 
     pub fn remove_api_key(&self, username: &str) -> Result<bool> {
         let conn = self.pool.get()?;
-
-        let rows = conn.execute("DELETE FROM api_keys WHERE username = ?", [username])?;
-
-        Ok(rows > 0)
+        let rows_affected = conn.execute("DELETE FROM api_keys WHERE username = ?", [username])?;
+        Ok(rows_affected > 0)
     }
 
     pub fn list_api_keys(&self) -> Result<Vec<ApiKey>> {

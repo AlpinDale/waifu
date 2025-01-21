@@ -137,25 +137,15 @@ pub async fn remove_api_key_handler(
     body: RemoveApiKeyRequest,
 ) -> Result<impl Reply, Rejection> {
     match store.remove_api_key(&body.username) {
-        Ok(true) => {
-            info!("Removed API key for user: {}", body.username);
-            Ok(warp::reply::with_status(
-                warp::reply::json(&json!({
-                    "message": format!("API key for user '{}' was successfully removed", body.username)
-                })),
-                warp::http::StatusCode::OK,
-            ))
-        }
-        Ok(false) => {
-            error!("API key not found for user: {}", body.username);
-            Err(warp::reject::not_found())
-        }
-        Err(e) => {
-            error!("Failed to remove API key: {}", e);
-            Err(warp::reject::custom(ImageError::DatabaseError(
-                e.to_string(),
-            )))
-        }
+        Ok(true) => Ok(warp::reply::json(&serde_json::json!({
+            "message": format!("API key for user '{}' was successfully removed", body.username)
+        }))),
+        Ok(false) => Err(warp::reject::custom(ImageError::UsernameNotFound(
+            body.username,
+        ))),
+        Err(e) => Err(warp::reject::custom(ImageError::DatabaseError(
+            e.to_string(),
+        ))),
     }
 }
 

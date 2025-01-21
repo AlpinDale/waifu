@@ -10,6 +10,7 @@ pub enum ImageError {
     RateLimitExceeded,
     UsernameExists(String),
     Unauthorized,
+    UsernameNotFound(String),
 }
 
 #[derive(Serialize)]
@@ -51,6 +52,10 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
             ImageError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 "Invalid or missing API key".to_string(),
+            ),
+            ImageError::UsernameNotFound(username) => (
+                StatusCode::NOT_FOUND,
+                format!("No API key found for username: {}", username),
             ),
         }
     } else {

@@ -1,4 +1,4 @@
-use crate::models::{ImageResponse, PathType};
+use crate::models::{ApiKey, ImageResponse, PathType};
 use anyhow::{anyhow, Result};
 use futures_util::StreamExt;
 use image::{GenericImageView, ImageFormat};
@@ -78,11 +78,21 @@ impl ImageStore {
         let conn = pool.get()?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS images (
-                id INTEGER PRIMARY KEY,
+                hash TEXT PRIMARY KEY,
                 filename TEXT NOT NULL UNIQUE,
-                hash TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 modified_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS api_keys (
+                key TEXT PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                last_used_at TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT 1
             )",
             [],
         )?;
@@ -489,6 +499,62 @@ impl ImageStore {
             created_at: OffsetDateTime::parse(&created_at, &Rfc3339)?,
             modified_at: OffsetDateTime::parse(&modified_at, &Rfc3339)?,
         })
+    }
+
+    pub fn generate_api_key(&self, username: &str) -> Result<String> {
+        let conn = self.pool.get()?;
+
+        let api_key = Uuid::new_v4().to_string();
+        let now = OffsetDateTime::now_utc().format(&Rfc3339)?;
+
+        conn.execute(
+            "INSERT INTO api_keys (key, username, created_at) VALUES (?, ?, ?)",
+            [&api_key, username, &now],
+        )?;
+
+        Ok(api_key)
+    }
+
+    pub fn remove_api_key(&self, username: &str) -> Result<bool> {
+        let conn = self.pool.get()?;
+
+        let rows = conn.execute("DELETE FROM api_keys WHERE username = ?", [username])?;
+
+        Ok(rows > 0)
+    }
+
+    pub fn list_api_keys(&self) -> Result<Vec<ApiKey>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(
+            "SELECT key, username, created_at, last_used_at, is_active 
+             FROM api_keys 
+             ORDER BY created_at DESC",
+        )?;
+
+        let keys = stmt
+            .query_map([], |row| {
+                let created_at_str: String = row.get(2)?;
+                let last_used_at_str: Option<String> = row.get(3)?;
+
+                let created_at = OffsetDateTime::parse(&created_at_str, &Rfc3339)
+                    .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+
+                let last_used_at = last_used_at_str
+                    .map(|dt| OffsetDateTime::parse(&dt, &Rfc3339))
+                    .transpose()
+                    .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+
+                Ok(ApiKey {
+                    key: row.get(0)?,
+                    username: row.get(1)?,
+                    created_at,
+                    last_used_at,
+                    is_active: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(keys)
     }
 }
 

@@ -75,10 +75,26 @@ async fn main() -> Result<()> {
         .and(warp::filters::header::headers_cloned())
         .and_then(handlers::get_image_by_filename_handler);
 
+    let api_key_routes = warp::path("api-keys")
+        .and(warp::post())
+        .and(store.clone())
+        .and(warp::body::json())
+        .and_then(handlers::generate_api_key_handler)
+        .or(warp::path("api-keys")
+            .and(warp::delete())
+            .and(store.clone())
+            .and(warp::body::json())
+            .and_then(handlers::remove_api_key_handler))
+        .or(warp::path("api-keys")
+            .and(warp::get())
+            .and(store.clone())
+            .and_then(handlers::list_api_keys_handler));
+
     let routes = random
         .or(add_image)
         .or(images)
         .or(image)
+        .or(api_key_routes)
         .recover(error::handle_rejection);
 
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;

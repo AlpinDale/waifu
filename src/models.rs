@@ -29,3 +29,24 @@ pub enum PathType {
     Url,
     Local,
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct ApiKey {
+    pub key: String,
+    pub username: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub last_used_at: Option<OffsetDateTime>,
+    pub is_active: bool,
+}
+
+#[derive(Deserialize)]
+pub struct GenerateApiKeyRequest {
+    pub username: String,
+}
+
+#[derive(Deserialize)]
+pub struct RemoveApiKeyRequest {
+    pub username: String,
+}

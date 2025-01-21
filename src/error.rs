@@ -8,6 +8,7 @@ pub enum ImageError {
     InvalidImage(String),
     FileTooLarge(String),
     RateLimitExceeded,
+    UsernameExists(String),
 }
 
 #[derive(Serialize)]
@@ -41,6 +42,10 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
             ImageError::RateLimitExceeded => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "Rate limit exceeded. Please try again later.".to_string(),
+            ),
+            ImageError::UsernameExists(username) => (
+                StatusCode::CONFLICT,
+                format!("API key already exists for username: {}", username),
             ),
         }
     } else {

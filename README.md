@@ -124,7 +124,7 @@ We welcome contributions! Please fork the repository and submit a pull request i
 If you use this software in your research, please cite:
 
 ```bibtex
-@software{waifu_api_2024,
+@software{waifu_2025,
   author = {AlpinDale},
   title = {Waifu: High-Performance Image Management System},
   year = {2025},

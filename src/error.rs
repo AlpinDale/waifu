@@ -46,17 +46,11 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
         }
     } else if let Some(e) = err.find::<ImageError>() {
         match e {
-            ImageError::PathNotFound(msg) => (
-                StatusCode::NOT_FOUND,
-                format!("The specified image path was not found: {}", msg),
+            ImageError::PathNotFound(msg) => (StatusCode::NOT_FOUND, msg.to_string()),
+            ImageError::DatabaseError(msg) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Database error: {}", msg),
             ),
-            ImageError::DatabaseError(msg) => {
-                error!("Database error details: {}", msg);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "An internal error occurred".to_string(),
-                )
-            }
             ImageError::InvalidImage(msg) => (
                 StatusCode::BAD_REQUEST,
                 format!("The provided file is not a valid image: {}", msg),

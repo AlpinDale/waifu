@@ -64,3 +64,60 @@ pub struct ApiKey {
 pub struct UpdateApiKeyStatusRequest {
     pub is_active: bool,
 }
+
+#[derive(Debug)]
+pub struct ImageFilters {
+    pub tags: Option<Vec<String>>,
+    pub width: Option<DimensionFilter>,
+    pub height: Option<DimensionFilter>,
+}
+
+#[derive(Debug)]
+pub enum DimensionFilter {
+    Exact(u32),
+    Range(u32, u32),
+}
+
+impl ImageFilters {
+    pub fn from_query(params: &std::collections::HashMap<String, String>) -> Self {
+        let tags = params.get("tags").map(|t| {
+            t.split(',')
+                .map(|s| s.trim().to_string())
+                .collect::<Vec<String>>()
+        });
+
+        let width = Self::parse_dimension(
+            params.get("width"),
+            params.get("width_min"),
+            params.get("width_max"),
+        );
+        let height = Self::parse_dimension(
+            params.get("height"),
+            params.get("height_min"),
+            params.get("height_max"),
+        );
+
+        Self {
+            tags,
+            width,
+            height,
+        }
+    }
+
+    fn parse_dimension(
+        exact: Option<&String>,
+        min: Option<&String>,
+        max: Option<&String>,
+    ) -> Option<DimensionFilter> {
+        if let Some(exact) = exact {
+            exact.parse().ok().map(DimensionFilter::Exact)
+        } else if let (Some(min), Some(max)) = (min, max) {
+            match (min.parse(), max.parse()) {
+                (Ok(min), Ok(max)) if min <= max => Some(DimensionFilter::Range(min, max)),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}

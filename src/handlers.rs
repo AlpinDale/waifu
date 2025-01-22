@@ -1,7 +1,7 @@
 use crate::cache::ImageCache;
 use crate::error::ImageError;
 use crate::models::{
-    AddImageRequest, GenerateApiKeyRequest, RemoveApiKeyRequest, UpdateApiKeyRequest,
+    AddImageRequest, GenerateApiKeyRequest, ImageFilters, RemoveApiKeyRequest, UpdateApiKeyRequest,
     UpdateApiKeyStatusRequest,
 };
 use crate::store::ImageStore;
@@ -12,17 +12,13 @@ use warp::{http::HeaderMap, Rejection, Reply};
 pub async fn get_random_image_handler(
     store: ImageStore,
     cache: ImageCache,
-    tags: Option<String>,
+    params: std::collections::HashMap<String, String>,
     _headers: HeaderMap,
     _: (),
 ) -> Result<impl Reply, Rejection> {
-    let tags = tags.map(|t| {
-        t.split(',')
-            .map(|s| s.trim().to_string())
-            .collect::<Vec<String>>()
-    });
+    let filters = ImageFilters::from_query(&params);
 
-    match store.get_random_image_with_tags(tags.as_deref()) {
+    match store.get_random_image_with_filters(&filters) {
         Ok(response) => {
             info!(
                 "Retrieved random image: {} ({}x{} pixels, {} bytes)",
@@ -35,7 +31,19 @@ pub async fn get_random_image_handler(
         }
         Err(e) => {
             error!("Failed to get random image: {}", e);
-            Err(warp::reject::not_found())
+            if e.to_string().contains("no such column") {
+                Err(warp::reject::custom(ImageError::DatabaseError(
+                    "Database schema is not up to date".to_string(),
+                )))
+            } else if e.to_string().contains("Query returned no rows") {
+                Err(warp::reject::custom(ImageError::PathNotFound(
+                    "No images found matching the specified criteria".to_string(),
+                )))
+            } else {
+                Err(warp::reject::custom(ImageError::DatabaseError(
+                    e.to_string(),
+                )))
+            }
         }
     }
 }

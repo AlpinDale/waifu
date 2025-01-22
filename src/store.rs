@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::models::{ApiKey, ImageResponse, PathType};
+use crate::models::{ApiKey, DimensionFilter, ImageFilters, ImageResponse, PathType};
 use anyhow::{anyhow, Result};
 use futures_util::StreamExt;
 use image::{GenericImageView, ImageFormat};
@@ -79,7 +79,9 @@ impl ImageStore {
                 hash TEXT PRIMARY KEY,
                 filename TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL,
-                modified_at TEXT NOT NULL
+                modified_at TEXT NOT NULL,
+                width INTEGER,
+                height INTEGER
             )",
             [],
         )?;
@@ -131,6 +133,11 @@ impl ImageStore {
                 [],
             )?;
         }
+
+        conn.execute(
+            "UPDATE images SET width = NULL, height = NULL WHERE width IS NULL",
+            [],
+        )?;
 
         let base_url = format!("{}/images", config.get_base_url());
 
@@ -400,48 +407,33 @@ impl ImageStore {
                 std::fs::copy(path, &dest_path)?;
 
                 info!("Verifying image integrity...");
-                match image::open(&dest_path) {
-                    Ok(img) => {
-                        let dimensions = img.dimensions();
-                        info!(
-                            "Successfully validated image: {} ({}x{} pixels, format: {:?})",
-                            filename, dimensions.0, dimensions.1, format
-                        );
-                        let now = OffsetDateTime::now_utc();
-                        let now_str = now.format(&Rfc3339)?;
-                        let hash = Self::calculate_file_hash(&dest_path)?;
+                let img = image::open(&dest_path)?;
+                let dimensions = img.dimensions();
+                info!(
+                    "Successfully validated image: {} ({}x{} pixels, format: {:?})",
+                    filename, dimensions.0, dimensions.1, format
+                );
+                let now = OffsetDateTime::now_utc();
+                let now_str = now.format(&Rfc3339)?;
+                let hash = Self::calculate_file_hash(&dest_path)?;
 
-                        info!("File hash: {}", hash);
+                info!("File hash: {}", hash);
 
-                        let conn = self.pool.get()?;
-                        match conn.execute(
-                            "INSERT INTO images (filename, hash, created_at, modified_at) 
-                             VALUES (?, ?, ?, ?)",
-                            [&filename, &hash, &now_str, &now_str],
-                        ) {
-                            Ok(_) => Ok(hash),
-                            Err(e)
-                                if e.to_string()
-                                    .contains("UNIQUE constraint failed: images.hash") =>
-                            {
-                                if dest_path.exists() {
-                                    warn!("Cleaning up duplicate file: {:?}", dest_path);
-                                    let _ = std::fs::remove_file(&dest_path);
-                                }
-                                Err(anyhow!("Image already exists in the database"))
-                            }
-                            Err(e) => Err(anyhow!(e)),
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to validate image: {}", e);
-                        if dest_path.exists() {
-                            warn!("Cleaning up invalid file: {:?}", dest_path);
-                            let _ = std::fs::remove_file(&dest_path);
-                        }
-                        Err(anyhow!("Invalid image file: {}", e))
-                    }
-                }
+                let conn = self.pool.get()?;
+                conn.execute(
+                    "INSERT INTO images (filename, hash, created_at, modified_at, width, height) 
+                     VALUES (?, ?, ?, ?, ?, ?)",
+                    [
+                        &filename,
+                        &hash,
+                        &now_str,
+                        &now_str,
+                        &dimensions.0.to_string(),
+                        &dimensions.1.to_string(),
+                    ],
+                )?;
+
+                Ok(hash)
             }
             PathType::Url => {
                 info!("Processing URL: {}", path);
@@ -485,46 +477,34 @@ impl ImageStore {
                 tokio::fs::rename(&temp_path, &dest_path).await?;
 
                 info!("Verifying image integrity...");
-                match image::open(&dest_path) {
-                    Ok(img) => {
-                        let dimensions = img.dimensions();
-                        info!(
-                            "Successfully validated image: {} ({}x{} pixels, format: {:?})",
-                            filename, dimensions.0, dimensions.1, format
-                        );
+                let img = image::open(&dest_path)?;
+                let dimensions = img.dimensions();
+                info!(
+                    "Successfully validated image: {} ({}x{} pixels, format: {:?})",
+                    filename, dimensions.0, dimensions.1, format
+                );
 
-                        let now = OffsetDateTime::now_utc();
-                        let now_str = now.format(&Rfc3339)?;
-                        let hash = Self::calculate_file_hash(&dest_path)?;
+                let now = OffsetDateTime::now_utc();
+                let now_str = now.format(&Rfc3339)?;
+                let hash = Self::calculate_file_hash(&dest_path)?;
 
-                        info!("File hash: {}", hash);
+                info!("File hash: {}", hash);
 
-                        let conn = self.pool.get()?;
-                        match conn.execute(
-                            "INSERT INTO images (filename, hash, created_at, modified_at) 
-                             VALUES (?, ?, ?, ?)",
-                            [&filename, &hash, &now_str, &now_str],
-                        ) {
-                            Ok(_) => Ok(hash),
-                            Err(e)
-                                if e.to_string()
-                                    .contains("UNIQUE constraint failed: images.hash") =>
-                            {
-                                if dest_path.exists() {
-                                    warn!("Cleaning up duplicate file: {:?}", dest_path);
-                                    let _ = std::fs::remove_file(&dest_path);
-                                }
-                                Err(anyhow!("Image already exists in the database"))
-                            }
-                            Err(e) => Err(anyhow!(e)),
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to validate image: {}", e);
-                        tokio::fs::remove_file(&dest_path).await?;
-                        Err(anyhow!("Invalid image file: {}", e))
-                    }
-                }
+                let conn = self.pool.get()?;
+                conn.execute(
+                    "INSERT INTO images (filename, hash, created_at, modified_at, width, height) 
+                     VALUES (?, ?, ?, ?, ?, ?)",
+                    [
+                        &filename,
+                        &hash,
+                        &now_str,
+                        &now_str,
+                        &dimensions.0.to_string(),
+                        &dimensions.1.to_string(),
+                    ],
+                )?;
+
+                Ok(hash)
             }
         }
     }
@@ -851,51 +831,102 @@ impl ImageStore {
         Ok(())
     }
 
-    pub fn get_random_image_with_tags(&self, tags: Option<&[String]>) -> Result<ImageResponse> {
+    pub fn get_random_image_with_filters(&self, filters: &ImageFilters) -> Result<ImageResponse> {
         let conn = self.pool.get()?;
+        let mut conditions = Vec::new();
+        let mut param_values = Vec::new();
 
-        let (query, params) = if let Some(tags) = tags {
-            if tags.is_empty() {
-                return self.get_random_image();
+        let mut query = String::from(
+            "SELECT i.filename, i.hash, i.created_at, i.modified_at 
+             FROM images i",
+        );
+
+        if let Some(tags) = &filters.tags {
+            if !tags.is_empty() {
+                query.push_str(
+                    "
+                    JOIN image_tags it ON i.hash = it.image_hash
+                    JOIN tags t ON it.tag_id = t.id
+                ",
+                );
+                conditions.push(format!(
+                    "t.name IN ({})",
+                    tags.iter().map(|_| "?").collect::<Vec<_>>().join(",")
+                ));
+                param_values.extend(tags.iter().cloned());
             }
+        }
 
-            let placeholders = (0..tags.len()).map(|_| "?").collect::<Vec<_>>().join(",");
+        if let Some(width_filter) = &filters.width {
+            match width_filter {
+                DimensionFilter::Exact(w) => {
+                    conditions.push("width = ?".to_string());
+                    param_values.push(w.to_string());
+                }
+                DimensionFilter::Range(min, max) => {
+                    conditions.push("width BETWEEN ? AND ?".to_string());
+                    param_values.push(min.to_string());
+                    param_values.push(max.to_string());
+                }
+            }
+        }
 
-            let query = format!(
-                "SELECT i.filename, i.hash, i.created_at, i.modified_at 
-                 FROM images i
-                 JOIN image_tags it ON i.hash = it.image_hash
-                 JOIN tags t ON it.tag_id = t.id
-                 WHERE t.name IN ({})
-                 GROUP BY i.hash
-                 HAVING COUNT(DISTINCT t.name) = {}
-                 ORDER BY RANDOM()
-                 LIMIT 1",
-                placeholders,
-                tags.len()
-            );
+        if let Some(height_filter) = &filters.height {
+            match height_filter {
+                DimensionFilter::Exact(h) => {
+                    conditions.push("height = ?".to_string());
+                    param_values.push(h.to_string());
+                }
+                DimensionFilter::Range(min, max) => {
+                    conditions.push("height BETWEEN ? AND ?".to_string());
+                    param_values.push(min.to_string());
+                    param_values.push(max.to_string());
+                }
+            }
+        }
 
-            let params: Vec<&dyn rusqlite::ToSql> = tags.iter().map(|s| s as _).collect();
-            (query, params)
-        } else {
-            (
-                "SELECT filename, hash, created_at, modified_at 
-                 FROM images ORDER BY RANDOM() LIMIT 1"
-                    .to_string(),
-                Vec::new(),
-            )
-        };
+        if !conditions.is_empty() {
+            query.push_str(" WHERE ");
+            query.push_str(&conditions.join(" AND "));
+        }
 
-        let (filename, hash, created_at, modified_at): (String, String, String, String) = conn
-            .query_row(&query, &params[..], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-            })?;
+        if let Some(tags) = &filters.tags {
+            if !tags.is_empty() {
+                query.push_str(&format!(
+                    " GROUP BY i.hash HAVING COUNT(DISTINCT t.name) = {}",
+                    tags.len()
+                ));
+            }
+        }
 
-        let tags = self.get_image_tags(&hash)?;
-        let file_path = self.images_dir.join(&filename);
+        query.push_str(" ORDER BY RANDOM() LIMIT 1");
+
+        let params: Vec<&str> = param_values.iter().map(|s| s.as_str()).collect();
+
+        let row = conn.query_row(&query, rusqlite::params_from_iter(params), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+
+        let (filename, hash, created_at, modified_at) = row;
+        self.build_image_response(&filename, &hash, &created_at, &modified_at)
+    }
+
+    fn build_image_response(
+        &self,
+        filename: &str,
+        hash: &str,
+        created_at: &str,
+        modified_at: &str,
+    ) -> Result<ImageResponse> {
+        let tags = self.get_image_tags(hash)?;
+        let file_path = self.images_dir.join(filename);
 
         let metadata = std::fs::metadata(&file_path)?;
-
         let img = image::open(&file_path)?;
         let dimensions = img.dimensions();
 
@@ -907,15 +938,15 @@ impl ImageStore {
 
         Ok(ImageResponse {
             url: format!("{}/{}", self.base_url, filename),
-            filename,
+            filename: filename.to_string(),
             format,
             width: dimensions.0,
             height: dimensions.1,
             size_bytes: metadata.len(),
-            hash,
+            hash: hash.to_string(),
             tags,
-            created_at: OffsetDateTime::parse(&created_at, &Rfc3339)?,
-            modified_at: OffsetDateTime::parse(&modified_at, &Rfc3339)?,
+            created_at: OffsetDateTime::parse(created_at, &Rfc3339)?,
+            modified_at: OffsetDateTime::parse(modified_at, &Rfc3339)?,
         })
     }
 }

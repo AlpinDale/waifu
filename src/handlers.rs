@@ -35,9 +35,27 @@ pub async fn add_image_handler(
     store: ImageStore,
     body: AddImageRequest,
 ) -> Result<impl Reply, Rejection> {
-    info!("Adding new image from {}", body.path);
+    if body.tags.is_empty() {
+        error!("Attempt to upload image without tags");
+        return Err(warp::reject::custom(ImageError::MissingTags));
+    }
+
+    info!(
+        "Adding new image from {} with tags: {:?}",
+        body.path, body.tags
+    );
     match store.add_image(&body.path, body.path_type).await {
-        Ok(_) => {
+        Ok(hash) => {
+            match store.add_tags(&hash, &body.tags) {
+                Ok(_) => info!("Successfully added tags: {:?}", body.tags),
+                Err(e) => {
+                    error!("Failed to add tags: {}", e);
+                    return Err(warp::reject::custom(ImageError::DatabaseError(format!(
+                        "Failed to add tags: {}",
+                        e
+                    ))));
+                }
+            }
             info!("Successfully added image from {}", body.path);
             Ok(warp::reply::with_status(
                 "Image added successfully",
@@ -54,7 +72,10 @@ pub async fn add_image_handler(
                 || e.to_string().contains("Unsupported image format")
             {
                 ImageError::InvalidImage(e.to_string())
+            } else if e.to_string().contains("already exists") {
+                ImageError::DuplicateImage(e.to_string())
             } else {
+                error!("Unexpected error: {}", e);
                 ImageError::DatabaseError(e.to_string())
             };
             Err(warp::reject::custom(err))

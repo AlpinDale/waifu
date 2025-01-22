@@ -99,10 +99,10 @@ async fn main() -> Result<()> {
 
     let add_image = warp::path("image")
         .and(warp::post())
-        .and(store.clone())
         .and(warp::body::json())
+        .and(store.clone())
         .and(auth.require_auth())
-        .map(|store, body, ()| (store, body))
+        .map(|body, store, ()| (store, body))
         .and_then(|args: (ImageStore, AddImageRequest)| async move {
             handlers::add_image_handler(args.0, args.1).await
         });

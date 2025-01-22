@@ -340,7 +340,7 @@ impl ImageStore {
         Ok(temp_path)
     }
 
-    pub async fn add_image(&self, path: &str, path_type: PathType) -> Result<()> {
+    pub async fn add_image(&self, path: &str, path_type: PathType) -> Result<String> {
         match path_type {
             PathType::Local => {
                 let src_path = std::path::Path::new(path);
@@ -417,12 +417,24 @@ impl ImageStore {
                         info!("File hash: {}", hash);
 
                         let conn = self.pool.get()?;
-                        conn.execute(
+                        match conn.execute(
                             "INSERT INTO images (filename, hash, created_at, modified_at) 
                              VALUES (?, ?, ?, ?)",
                             [&filename, &hash, &now_str, &now_str],
-                        )?;
-                        Ok(())
+                        ) {
+                            Ok(_) => Ok(hash),
+                            Err(e)
+                                if e.to_string()
+                                    .contains("UNIQUE constraint failed: images.hash") =>
+                            {
+                                if dest_path.exists() {
+                                    warn!("Cleaning up duplicate file: {:?}", dest_path);
+                                    let _ = std::fs::remove_file(&dest_path);
+                                }
+                                Err(anyhow!("Image already exists in the database"))
+                            }
+                            Err(e) => Err(anyhow!(e)),
+                        }
                     }
                     Err(e) => {
                         error!("Failed to validate image: {}", e);
@@ -491,13 +503,24 @@ impl ImageStore {
                         info!("File hash: {}", hash);
 
                         let conn = self.pool.get()?;
-                        conn.execute(
+                        match conn.execute(
                             "INSERT INTO images (filename, hash, created_at, modified_at) 
                              VALUES (?, ?, ?, ?)",
                             [&filename, &hash, &now_str, &now_str],
-                        )?;
-
-                        Ok(())
+                        ) {
+                            Ok(_) => Ok(hash),
+                            Err(e)
+                                if e.to_string()
+                                    .contains("UNIQUE constraint failed: images.hash") =>
+                            {
+                                if dest_path.exists() {
+                                    warn!("Cleaning up duplicate file: {:?}", dest_path);
+                                    let _ = std::fs::remove_file(&dest_path);
+                                }
+                                Err(anyhow!("Image already exists in the database"))
+                            }
+                            Err(e) => Err(anyhow!(e)),
+                        }
                     }
                     Err(e) => {
                         error!("Failed to validate image: {}", e);

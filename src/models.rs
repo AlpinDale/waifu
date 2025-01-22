@@ -22,6 +22,7 @@ pub struct AddImageRequest {
     pub path: String,
     #[serde(rename = "type")]
     pub path_type: PathType,
+    pub tags: Vec<String>,
 }
 
 #[derive(Deserialize)]

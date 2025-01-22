@@ -28,12 +28,18 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
     error!("Request rejected: {:?}", err);
 
     let (code, message) = if let Some(e) = err.find::<warp::filters::body::BodyDeserializeError>() {
-        error!("Deserialization error details: {}", e);
-        (
-            StatusCode::BAD_REQUEST,
-            "Invalid request format. Please check the API documentation for required fields."
-                .to_string(),
-        )
+        if e.to_string().contains("missing field `tags`") {
+            (
+                StatusCode::BAD_REQUEST,
+                "The 'tags' field is required when uploading an image".to_string(),
+            )
+        } else {
+            (
+                StatusCode::BAD_REQUEST,
+                "Invalid request format. Please check the API documentation for required fields."
+                    .to_string(),
+            )
+        }
     } else if let Some(e) = err.find::<ImageError>() {
         match e {
             ImageError::PathNotFound(_) => (

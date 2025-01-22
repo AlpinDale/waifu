@@ -58,7 +58,11 @@ pub async fn add_image_handler(
             }
             info!("Successfully added image from {}", body.path);
             Ok(warp::reply::with_status(
-                "Image added successfully",
+                warp::reply::json(&json!({
+                    "message": "Image added successfully",
+                    "hash": hash,
+                    "tags": body.tags
+                })),
                 warp::http::StatusCode::CREATED,
             ))
         }
@@ -205,6 +209,30 @@ pub async fn update_api_key_handler(
         }
         Err(e) => {
             error!("Failed to update API key: {}", e);
+            Err(warp::reject::custom(ImageError::DatabaseError(
+                e.to_string(),
+            )))
+        }
+    }
+}
+
+pub async fn remove_image_handler(
+    filename: String,
+    store: ImageStore,
+    _: (), // Admin auth result
+) -> Result<impl Reply, Rejection> {
+    match store.remove_image(&filename) {
+        Ok(()) => {
+            info!("Successfully removed image: {}", filename);
+            Ok(warp::reply::with_status(
+                warp::reply::json(&json!({
+                    "message": format!("Image '{}' was successfully removed", filename)
+                })),
+                warp::http::StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            error!("Failed to remove image {}: {}", filename, e);
             Err(warp::reject::custom(ImageError::DatabaseError(
                 e.to_string(),
             )))

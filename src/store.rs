@@ -796,6 +796,36 @@ impl ImageStore {
 
         Ok(tags)
     }
+
+    pub fn remove_image(&self, filename: &str) -> Result<()> {
+        let mut conn = self.pool.get()?;
+        let file_path = self.images_dir.join(filename);
+
+        let tx = conn.transaction()?;
+
+        let hash: String = tx.query_row(
+            "SELECT hash FROM images WHERE filename = ?",
+            [filename],
+            |row| row.get(0),
+        )?;
+
+        tx.execute("DELETE FROM image_tags WHERE image_hash = ?", [&hash])?;
+
+        tx.execute("DELETE FROM images WHERE hash = ?", [&hash])?;
+
+        tx.execute(
+            "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM image_tags)",
+            [],
+        )?;
+
+        tx.commit()?;
+
+        if file_path.exists() {
+            std::fs::remove_file(file_path)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Clone for ImageStore {

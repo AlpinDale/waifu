@@ -4,6 +4,7 @@ mod config;
 mod error;
 mod handlers;
 mod limiter;
+mod middleware;
 mod models;
 mod store;
 
@@ -14,6 +15,7 @@ use crate::store::ImageStore;
 use anyhow::Result;
 use auth::Auth;
 use chrono;
+use middleware::{add_request_id_header, with_request_id};
 use serde_json;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -211,8 +213,10 @@ async fn main() -> Result<()> {
         .or(warp::options()
             .and(warp::path::full())
             .map(|_| warp::reply()))
-        .with(cors())
-        .recover(error::handle_rejection);
+        .and(with_request_id())
+        .map(|reply, request_id| add_request_id_header(reply, request_id))
+        .recover(error::handle_rejection)
+        .with(cors());
 
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
 

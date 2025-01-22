@@ -1,5 +1,6 @@
 use serde::Serialize;
 use tracing::error;
+use uuid::Uuid;
 use warp::{http::StatusCode, reject::Reject, Rejection, Reply};
 
 #[derive(Debug)]
@@ -21,12 +22,14 @@ pub enum ImageError {
 struct ErrorResponse {
     code: u16,
     message: String,
+    request_id: String,
 }
 
 impl Reject for ImageError {}
 
 pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
-    error!("Request rejected: {:?}", err);
+    let request_id = Uuid::new_v4().to_string();
+    error!(request_id = %request_id, "Request rejected: {:?}", err);
 
     let (code, message) = if let Some(e) = err.find::<warp::filters::body::BodyDeserializeError>() {
         if e.to_string().contains("missing field `tags`") {
@@ -102,7 +105,7 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
             "This method is not allowed for this endpoint".to_string(),
         )
     } else {
-        error!("Unhandled rejection: {:?}", err);
+        error!(request_id = %request_id, "Unhandled rejection: {:?}", err);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             "An internal error occurred".to_string(),
@@ -112,6 +115,7 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
     let json = warp::reply::json(&ErrorResponse {
         code: code.as_u16(),
         message,
+        request_id,
     });
 
     Ok(warp::reply::with_status(json, code))

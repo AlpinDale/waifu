@@ -43,9 +43,9 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
         }
     } else if let Some(e) = err.find::<ImageError>() {
         match e {
-            ImageError::PathNotFound(_) => (
+            ImageError::PathNotFound(msg) => (
                 StatusCode::NOT_FOUND,
-                "The specified image path was not found".to_string(),
+                format!("The specified image path was not found: {}", msg),
             ),
             ImageError::DatabaseError(msg) => {
                 error!("Database error details: {}", msg);
@@ -54,21 +54,21 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
                     "An internal error occurred".to_string(),
                 )
             }
-            ImageError::InvalidImage(_) => (
+            ImageError::InvalidImage(msg) => (
                 StatusCode::BAD_REQUEST,
-                "The provided file is not a valid image".to_string(),
+                format!("The provided file is not a valid image: {}", msg),
             ),
-            ImageError::FileTooLarge(_) => (
+            ImageError::FileTooLarge(msg) => (
                 StatusCode::PAYLOAD_TOO_LARGE,
-                "The image file exceeds the maximum allowed size".to_string(),
+                format!("The image file exceeds the maximum allowed size: {}", msg),
             ),
             ImageError::RateLimitExceeded => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "Rate limit exceeded. Please try again later.".to_string(),
             ),
-            ImageError::UsernameExists(_) => (
+            ImageError::UsernameExists(username) => (
                 StatusCode::CONFLICT,
-                "The specified username is already in use".to_string(),
+                format!("The username '{}' is already in use", username),
             ),
             ImageError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
@@ -78,13 +78,13 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
                 StatusCode::UNAUTHORIZED,
                 "This API key has been deactivated. Please contact the administrator.".to_string(),
             ),
-            ImageError::UsernameNotFound(_) => (
+            ImageError::UsernameNotFound(username) => (
                 StatusCode::NOT_FOUND,
-                "The specified username was not found".to_string(),
+                format!("The username '{}' was not found", username),
             ),
-            ImageError::DuplicateImage(_) => (
+            ImageError::DuplicateImage(msg) => (
                 StatusCode::CONFLICT,
-                "This image has already been uploaded".to_string(),
+                format!("This image has already been uploaded: {}", msg),
             ),
             ImageError::MissingTags => (
                 StatusCode::BAD_REQUEST,

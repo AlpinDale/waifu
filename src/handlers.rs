@@ -283,3 +283,40 @@ pub async fn remove_image_handler(
         }
     }
 }
+
+pub async fn remove_image_tags_handler(
+    filename: String,
+    store: ImageStore,
+    tags: Vec<String>,
+    _: (), // Admin auth result
+) -> Result<impl Reply, Rejection> {
+    let image = match store.get_image_by_filename(&filename) {
+        Ok(img) => img,
+        Err(e) => {
+            error!("Failed to get image {}: {}", filename, e);
+            return Err(warp::reject::not_found());
+        }
+    };
+
+    match store.remove_tags(&image.hash, &tags) {
+        Ok(()) => {
+            info!(
+                "Successfully removed tags {:?} from image: {}",
+                tags, filename
+            );
+            Ok(warp::reply::with_status(
+                warp::reply::json(&serde_json::json!({
+                    "message": format!("Tags removed successfully from image '{}'", filename),
+                    "removed_tags": tags
+                })),
+                warp::http::StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            error!("Failed to remove tags from image {}: {}", filename, e);
+            Err(warp::reject::custom(ImageError::DatabaseError(
+                e.to_string(),
+            )))
+        }
+    }
+}

@@ -115,7 +115,9 @@ impl ImageStore {
                 username TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL,
                 last_used_at TEXT,
-                is_active BOOLEAN NOT NULL DEFAULT 1
+                is_active BOOLEAN NOT NULL DEFAULT 1,
+                requests_per_second INTEGER,
+                max_batch_size INTEGER
             )",
             [],
         )?;
@@ -515,6 +517,7 @@ impl ImageStore {
         &self,
         username: &str,
         requests_per_second: Option<u32>,
+        max_batch_size: Option<u32>,
     ) -> Result<String> {
         let conn = self.pool.get()?;
 
@@ -522,8 +525,15 @@ impl ImageStore {
         let now = OffsetDateTime::now_utc().format(&Rfc3339)?;
 
         conn.execute(
-            "INSERT INTO api_keys (key, username, created_at, requests_per_second) VALUES (?, ?, ?, ?)",
-            params![&api_key, username, &now, requests_per_second],
+            "INSERT INTO api_keys (key, username, created_at, requests_per_second, max_batch_size) 
+             VALUES (?, ?, ?, ?, ?)",
+            params![
+                &api_key,
+                username,
+                &now,
+                requests_per_second,
+                max_batch_size
+            ],
         )?;
 
         Ok(api_key)
@@ -538,7 +548,7 @@ impl ImageStore {
     pub fn list_api_keys(&self) -> Result<Vec<ApiKey>> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(
-            "SELECT key, username, created_at, last_used_at, is_active, requests_per_second 
+            "SELECT key, username, created_at, last_used_at, is_active, requests_per_second, max_batch_size 
              FROM api_keys 
              ORDER BY created_at DESC",
         )?;
@@ -575,6 +585,7 @@ impl ImageStore {
                     last_used_at,
                     is_active: row.get(4)?,
                     requests_per_second: row.get(5)?,
+                    max_batch_size: row.get(6)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -602,7 +613,7 @@ impl ImageStore {
     pub fn get_api_key(&self, key: &str) -> Result<ApiKey> {
         let conn = self.pool.get()?;
         let result = conn.query_row(
-            "SELECT key, username, created_at, last_used_at, is_active, requests_per_second FROM api_keys WHERE key = ?",
+            "SELECT key, username, created_at, last_used_at, is_active, requests_per_second, max_batch_size FROM api_keys WHERE key = ?",
             [key],
             |row| {
                 let created_at_str: String = row.get(2)?;
@@ -633,6 +644,7 @@ impl ImageStore {
                     last_used_at,
                     is_active: row.get(4)?,
                     requests_per_second: row.get(5)?,
+                    max_batch_size: row.get(6)?,
                 })
             },
         )?;

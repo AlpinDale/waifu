@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::fmt;
 use tracing::error;
 use uuid::Uuid;
 use warp::{http::StatusCode, reject::Reject, Rejection, Reply};
@@ -16,6 +17,30 @@ pub enum ImageError {
     UsernameNotFound(String),
     DuplicateImage(String),
     MissingTags,
+    BatchSizeExceeded(u32),
+}
+
+impl fmt::Display for ImageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ImageError::PathNotFound(msg) => write!(f, "Path not found: {}", msg),
+            ImageError::DatabaseError(msg) => write!(f, "Database error: {}", msg),
+            ImageError::InvalidImage(msg) => write!(f, "Invalid image: {}", msg),
+            ImageError::FileTooLarge(msg) => write!(f, "File too large: {}", msg),
+            ImageError::RateLimitExceeded => write!(f, "Rate limit exceeded"),
+            ImageError::UsernameExists(username) => {
+                write!(f, "Username already exists: {}", username)
+            }
+            ImageError::Unauthorized => write!(f, "Unauthorized"),
+            ImageError::InactiveKey => write!(f, "API key is inactive"),
+            ImageError::UsernameNotFound(username) => write!(f, "Username not found: {}", username),
+            ImageError::DuplicateImage(msg) => write!(f, "Duplicate image: {}", msg),
+            ImageError::MissingTags => write!(f, "Missing tags"),
+            ImageError::BatchSizeExceeded(max) => {
+                write!(f, "Batch size exceeds maximum of {}", max)
+            }
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -86,6 +111,10 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
             ImageError::MissingTags => (
                 StatusCode::BAD_REQUEST,
                 "At least one tag is required when uploading an image".to_string(),
+            ),
+            ImageError::BatchSizeExceeded(max) => (
+                StatusCode::BAD_REQUEST,
+                format!("Batch size exceeds maximum allowed size of {}", max),
             ),
         }
     } else if err.is_not_found() {

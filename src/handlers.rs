@@ -1,10 +1,13 @@
 use crate::cache::ImageCache;
 use crate::error::ImageError;
+use crate::models::ApiKey;
 use crate::models::{
-    AddImageRequest, GenerateApiKeyRequest, ImageFilters, RemoveApiKeyRequest, UpdateApiKeyRequest,
+    AddImageRequest, BatchAddImageRequest, BatchImageResponse, BatchRandomRequest,
+    GenerateApiKeyRequest, ImageFilters, RemoveApiKeyRequest, UpdateApiKeyRequest,
     UpdateApiKeyStatusRequest,
 };
 use crate::store::ImageStore;
+use futures_util::future::join_all;
 use serde_json::json;
 use tracing::{error, info};
 use warp::{http::HeaderMap, Rejection, Reply};
@@ -136,11 +139,16 @@ pub async fn generate_api_key_handler(
     store: ImageStore,
     body: GenerateApiKeyRequest,
 ) -> Result<impl Reply, Rejection> {
-    match store.generate_api_key(&body.username, body.requests_per_second) {
+    match store.generate_api_key(
+        &body.username,
+        body.requests_per_second,
+        body.max_batch_size,
+    ) {
         Ok(api_key) => {
             info!(
                 username = %body.username,
                 rate_limit = ?body.requests_per_second,
+                max_batch = ?body.max_batch_size,
                 "Generated new API key"
             );
             Ok(warp::reply::with_status(
@@ -148,7 +156,9 @@ pub async fn generate_api_key_handler(
                     "username": body.username,
                     "api_key": api_key,
                     "rate_limit": body.requests_per_second.map(|r| format!("{} requests/second", r))
-                        .unwrap_or_else(|| "unlimited".to_string())
+                        .unwrap_or_else(|| "unlimited".to_string()),
+                    "max_batch_size": body.max_batch_size.map(|s| s.to_string())
+                        .unwrap_or_else(|| "1".to_string())
                 })),
                 warp::http::StatusCode::CREATED,
             ))
@@ -397,4 +407,143 @@ pub async fn get_all_tags_handler(
             )))
         }
     }
+}
+
+pub async fn batch_random_images_handler(
+    store: ImageStore,
+    cache: ImageCache,
+    params: std::collections::HashMap<String, String>,
+    _headers: HeaderMap,
+    auth_info: ApiKey,
+    body: BatchRandomRequest,
+) -> Result<impl Reply, Rejection> {
+    let max_batch = auth_info.max_batch_size.unwrap_or(1);
+    if body.count > max_batch {
+        return Err(warp::reject::custom(ImageError::BatchSizeExceeded(
+            max_batch,
+        )));
+    }
+
+    let filters = ImageFilters::from_query(&params);
+    let mut images = Vec::new();
+    let mut errors = Vec::new();
+
+    for _ in 0..body.count {
+        match store.get_random_image_with_filters(&filters) {
+            Ok(response) => {
+                info!(
+                    "Retrieved random image: {} ({}x{} pixels, {} bytes)",
+                    response.filename, response.width, response.height, response.size_bytes
+                );
+                cache
+                    .insert(response.filename.clone(), response.clone())
+                    .await;
+                images.push(response);
+            }
+            Err(e) => {
+                error!("Failed to get random image: {}", e);
+                errors.push(e.to_string());
+            }
+        }
+    }
+
+    let total = body.count as usize;
+    let successful = images.len();
+    let failed = errors.len();
+
+    Ok(warp::reply::json(&BatchImageResponse {
+        images,
+        total,
+        successful,
+        failed,
+        errors,
+    }))
+}
+
+pub async fn batch_add_images_handler(
+    store: ImageStore,
+    body: BatchAddImageRequest,
+    auth_info: ApiKey,
+) -> Result<impl Reply, Rejection> {
+    let max_batch = auth_info.max_batch_size.unwrap_or(1);
+    if body.images.len() > max_batch as usize {
+        return Err(warp::reject::custom(ImageError::BatchSizeExceeded(
+            max_batch,
+        )));
+    }
+
+    let mut successful = Vec::new();
+    let mut errors = Vec::new();
+
+    let futures: Vec<_> = body
+        .images
+        .into_iter()
+        .map(|req| {
+            let store = store.clone();
+            async move {
+                if req.tags.is_empty() {
+                    return Err(ImageError::MissingTags);
+                }
+
+                match store.add_image(&req.path, req.path_type).await {
+                    Ok(hash) => match store.add_tags(&hash, &req.tags) {
+                        Ok(_) => Ok((hash, req.tags)),
+                        Err(e) => {
+                            error!("Failed to add tags: {}", e);
+                            Err(ImageError::DatabaseError(format!(
+                                "Failed to add tags: {}",
+                                e
+                            )))
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to add image: {}", e);
+                        Err(if e.to_string().contains("not found") {
+                            ImageError::PathNotFound(e.to_string())
+                        } else if e.to_string().contains("too large") {
+                            ImageError::FileTooLarge(e.to_string())
+                        } else if e.to_string().contains("Invalid image")
+                            || e.to_string().contains("Unsupported image format")
+                        {
+                            ImageError::InvalidImage(e.to_string())
+                        } else if e.to_string().contains("already exists") {
+                            ImageError::DuplicateImage(e.to_string())
+                        } else {
+                            ImageError::DatabaseError(e.to_string())
+                        })
+                    }
+                }
+            }
+        })
+        .collect();
+
+    let results = join_all(futures).await;
+
+    for result in results {
+        match result {
+            Ok((hash, tags)) => {
+                successful.push(serde_json::json!({
+                    "hash": hash,
+                    "tags": tags
+                }));
+            }
+            Err(e) => {
+                errors.push(e.to_string());
+            }
+        }
+    }
+
+    let response = serde_json::json!({
+        "message": "Batch processing completed",
+        "total": successful.len() + errors.len(),
+        "successful": successful.len(),
+        "failed": errors.len(),
+        "results": successful,
+        "errors": errors
+    });
+
+    Ok(warp::reply::with_status(
+        warp::reply::json(&response),
+        warp::http::StatusCode::CREATED,
+    ))
 }

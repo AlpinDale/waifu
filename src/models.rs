@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ImageResponse {
     pub url: String,
     pub filename: String,
@@ -17,7 +17,7 @@ pub struct ImageResponse {
     pub modified_at: OffsetDateTime,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct AddImageRequest {
     pub path: String,
     #[serde(rename = "type")]
@@ -25,7 +25,7 @@ pub struct AddImageRequest {
     pub tags: Vec<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PathType {
     Url,
@@ -36,6 +36,7 @@ pub enum PathType {
 pub struct GenerateApiKeyRequest {
     pub username: String,
     pub requests_per_second: Option<u32>, // none = unlimited
+    pub max_batch_size: Option<u32>,      // none = no batching allowed (default=1)
 }
 
 #[derive(Deserialize)]
@@ -48,6 +49,26 @@ pub struct UpdateApiKeyRequest {
     pub requests_per_second: Option<u32>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct BatchAddImageRequest {
+    pub images: Vec<AddImageRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BatchRandomRequest {
+    pub count: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BatchImageResponse {
+    pub images: Vec<ImageResponse>,
+    pub total: usize,
+    pub successful: usize,
+    pub failed: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ApiKey {
     pub key: String,
@@ -58,6 +79,7 @@ pub struct ApiKey {
     pub last_used_at: Option<OffsetDateTime>,
     pub is_active: bool,
     pub requests_per_second: Option<u32>,
+    pub max_batch_size: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -91,6 +91,16 @@ async fn main() -> Result<()> {
         .and(auth.require_auth())
         .and_then(handlers::get_random_image_handler);
 
+    let batch_random = warp::path("random")
+        .and(warp::post())
+        .and(store.clone())
+        .and(cache.clone())
+        .and(warp::query::<std::collections::HashMap<String, String>>())
+        .and(warp::filters::header::headers_cloned())
+        .and(auth.require_auth_info())
+        .and(warp::body::json())
+        .and_then(handlers::batch_random_images_handler);
+
     let add_image = warp::path("image")
         .and(warp::post())
         .and(warp::body::json())
@@ -100,6 +110,13 @@ async fn main() -> Result<()> {
         .and_then(|args: (ImageStore, AddImageRequest)| async move {
             handlers::add_image_handler(args.0, args.1).await
         });
+
+    let batch_add_images = warp::path("images")
+        .and(warp::post())
+        .and(store.clone())
+        .and(warp::body::json())
+        .and(auth.require_auth_info())
+        .and_then(handlers::batch_add_images_handler);
 
     let remove_image = warp::path!("images" / String)
         .and(warp::delete())
@@ -185,7 +202,9 @@ async fn main() -> Result<()> {
 
     let api = health
         .or(random)
+        .or(batch_random)
         .or(add_image)
+        .or(batch_add_images)
         .or(remove_image)
         .or(remove_image_tags)
         .or(add_image_tags)

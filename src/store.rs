@@ -792,13 +792,19 @@ impl ImageStore {
         Ok(tags)
     }
 
-    pub fn get_all_tags(&self) -> Result<Vec<String>> {
+    pub fn get_all_tags(&self) -> Result<Vec<(String, i64)>> {
         let conn = self.pool.get()?;
-        let mut stmt = conn.prepare("SELECT name FROM tags ORDER BY name")?;
+        let mut stmt = conn.prepare(
+            "SELECT t.name, COUNT(it.image_hash) as count 
+             FROM tags t 
+             LEFT JOIN image_tags it ON t.id = it.tag_id 
+             GROUP BY t.name 
+             ORDER BY t.name",
+        )?;
 
         let tags = stmt
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<(String, i64)>, _>>()?;
 
         Ok(tags)
     }

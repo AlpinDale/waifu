@@ -359,3 +359,34 @@ pub async fn add_image_tags_handler(
         }
     }
 }
+
+pub async fn get_all_tags_handler(
+    store: ImageStore,
+    _: (), // Auth result
+) -> Result<impl Reply, Rejection> {
+    match store.get_all_tags() {
+        Ok(tags) => {
+            info!("Retrieved {} unique tags", tags.len());
+            let tag_objects: Vec<_> = tags
+                .into_iter()
+                .map(|(name, count)| {
+                    serde_json::json!({
+                        "name": name,
+                        "count": count
+                    })
+                })
+                .collect();
+
+            Ok(warp::reply::json(&serde_json::json!({
+                "tags": tag_objects,
+                "total_tags": tag_objects.len()
+            })))
+        }
+        Err(e) => {
+            error!("Failed to get tags: {}", e);
+            Err(warp::reject::custom(ImageError::DatabaseError(
+                e.to_string(),
+            )))
+        }
+    }
+}

@@ -847,6 +847,74 @@ impl ImageStore {
 
         Ok(())
     }
+
+    pub fn get_random_image_with_tags(&self, tags: Option<&[String]>) -> Result<ImageResponse> {
+        let conn = self.pool.get()?;
+
+        let (query, params) = if let Some(tags) = tags {
+            if tags.is_empty() {
+                return self.get_random_image();
+            }
+
+            let placeholders = (0..tags.len()).map(|_| "?").collect::<Vec<_>>().join(",");
+
+            let query = format!(
+                "SELECT i.filename, i.hash, i.created_at, i.modified_at 
+                 FROM images i
+                 JOIN image_tags it ON i.hash = it.image_hash
+                 JOIN tags t ON it.tag_id = t.id
+                 WHERE t.name IN ({})
+                 GROUP BY i.hash
+                 HAVING COUNT(DISTINCT t.name) = {}
+                 ORDER BY RANDOM()
+                 LIMIT 1",
+                placeholders,
+                tags.len()
+            );
+
+            let params: Vec<&dyn rusqlite::ToSql> = tags.iter().map(|s| s as _).collect();
+            (query, params)
+        } else {
+            (
+                "SELECT filename, hash, created_at, modified_at 
+                 FROM images ORDER BY RANDOM() LIMIT 1"
+                    .to_string(),
+                Vec::new(),
+            )
+        };
+
+        let (filename, hash, created_at, modified_at): (String, String, String, String) = conn
+            .query_row(&query, &params[..], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
+
+        let tags = self.get_image_tags(&hash)?;
+        let file_path = self.images_dir.join(&filename);
+
+        let metadata = std::fs::metadata(&file_path)?;
+
+        let img = image::open(&file_path)?;
+        let dimensions = img.dimensions();
+
+        let format = file_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_uppercase())
+            .unwrap_or_else(|| "UNKNOWN".to_string());
+
+        Ok(ImageResponse {
+            url: format!("{}/{}", self.base_url, filename),
+            filename,
+            format,
+            width: dimensions.0,
+            height: dimensions.1,
+            size_bytes: metadata.len(),
+            hash,
+            tags,
+            created_at: OffsetDateTime::parse(&created_at, &Rfc3339)?,
+            modified_at: OffsetDateTime::parse(&modified_at, &Rfc3339)?,
+        })
+    }
 }
 
 impl Clone for ImageStore {

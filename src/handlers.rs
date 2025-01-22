@@ -12,9 +12,17 @@ use warp::{http::HeaderMap, Rejection, Reply};
 pub async fn get_random_image_handler(
     store: ImageStore,
     cache: ImageCache,
+    tags: Option<String>,
     _headers: HeaderMap,
+    _: (),
 ) -> Result<impl Reply, Rejection> {
-    match store.get_random_image() {
+    let tags = tags.map(|t| {
+        t.split(',')
+            .map(|s| s.trim().to_string())
+            .collect::<Vec<String>>()
+    });
+
+    match store.get_random_image_with_tags(tags.as_deref()) {
         Ok(response) => {
             info!(
                 "Retrieved random image: {} ({}x{} pixels, {} bytes)",

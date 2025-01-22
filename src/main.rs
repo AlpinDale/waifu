@@ -90,12 +90,19 @@ async fn main() -> Result<()> {
         .and(warp::get())
         .and(store.clone())
         .and(cache.clone())
+        .and(warp::query::<std::collections::HashMap<String, String>>())
         .and(warp::filters::header::headers_cloned())
         .and(auth.require_auth())
-        .map(|store, cache, headers, ()| (store, cache, headers))
-        .and_then(|args: (ImageStore, ImageCache, HeaderMap)| async move {
-            handlers::get_random_image_handler(args.0, args.1, args.2).await
-        });
+        .and_then(
+            |store: ImageStore,
+             cache: ImageCache,
+             params: std::collections::HashMap<String, String>,
+             headers: HeaderMap,
+             _: ()| async move {
+                let tags = params.get("tags").cloned();
+                handlers::get_random_image_handler(store, cache, tags, headers, ()).await
+            },
+        );
 
     let add_image = warp::path("image")
         .and(warp::post())

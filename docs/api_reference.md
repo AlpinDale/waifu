@@ -479,3 +479,38 @@ This will set the API key to inactive. You can also set it to active by passing 
 ```
 
 If the username is not found, returns 404 Not Found.
+
+### Upload Image (Multipart Form)
+```sh
+POST /upload
+```
+
+Uploads a single image with tags using multipart form data.
+
+**Form Fields:**
+- `file` - The image file to upload
+- `tags` - JSON array of tags as a string (e.g., `'["tag1", "tag2"]'`)
+
+**Example:**
+```bash
+curl -X POST http://localhost:8000/upload \
+  -H "Authorization: Bearer your_api_key" \
+  -F "file=@/path/to/image.jpg" \
+  -F 'tags=["cat", "cute"]'
+```
+
+**Response:**
+```json
+{
+  "message": "Image uploaded successfully",
+  "hash": "abc123...",
+  "tags": ["cat", "cute"]
+}
+```
+
+**Notes:**
+1. The file must be a valid image (JPEG, PNG, GIF, WebP, or BMP)
+2. Maximum file size is 10MB
+3. At least one tag is required
+4. Tags must be provided as a valid JSON array string
+5. The `Content-Type` header is automatically set by the multipart form data

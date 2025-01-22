@@ -508,8 +508,12 @@ impl ImageStore {
             size_bytes: metadata.len(),
             hash,
             tags,
-            created_at: OffsetDateTime::parse(&created_at, &Rfc3339)?,
-            modified_at: OffsetDateTime::parse(&modified_at, &Rfc3339)?,
+            created_at: OffsetDateTime::parse(&created_at, &Rfc3339)?
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| "".to_string()),
+            modified_at: OffsetDateTime::parse(&modified_at, &Rfc3339)?
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| "".to_string()),
         })
     }
 
@@ -937,8 +941,12 @@ impl ImageStore {
             size_bytes: metadata.len(),
             hash: hash.to_string(),
             tags,
-            created_at: OffsetDateTime::parse(created_at, &Rfc3339)?,
-            modified_at: OffsetDateTime::parse(modified_at, &Rfc3339)?,
+            created_at: OffsetDateTime::parse(&created_at, &Rfc3339)?
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| "".to_string()),
+            modified_at: OffsetDateTime::parse(&modified_at, &Rfc3339)?
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| "".to_string()),
         })
     }
 }

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ImageResponse {
     pub url: String,
     pub filename: String,
@@ -11,10 +11,8 @@ pub struct ImageResponse {
     pub size_bytes: u64,
     pub hash: String,
     pub tags: Vec<String>,
-    #[serde(with = "time::serde::rfc3339")]
-    pub created_at: OffsetDateTime,
-    #[serde(with = "time::serde::rfc3339")]
-    pub modified_at: OffsetDateTime,
+    pub created_at: String,
+    pub modified_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,15 +55,25 @@ pub struct BatchAddImageRequest {
 #[derive(Debug, Deserialize)]
 pub struct BatchRandomRequest {
     pub count: u32,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub width: Option<u32>,
+    pub width_min: Option<u32>,
+    pub width_max: Option<u32>,
+    pub height: Option<u32>,
+    pub height_min: Option<u32>,
+    pub height_max: Option<u32>,
+    pub size: Option<u64>,
+    pub size_min: Option<u64>,
+    pub size_max: Option<u64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BatchImageResponse {
     pub images: Vec<ImageResponse>,
     pub total: usize,
     pub successful: usize,
     pub failed: usize,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<String>,
 }
 
@@ -107,6 +115,7 @@ pub enum SizeFilter {
     Range(u64, u64),
 }
 
+#[allow(unused)]
 impl ImageFilters {
     pub fn from_query(params: &std::collections::HashMap<String, String>) -> Self {
         let tags = params.get("tags").map(|t| {
@@ -167,6 +176,49 @@ impl ImageFilters {
             match (min.parse(), max.parse()) {
                 (Ok(min), Ok(max)) if min <= max => Some(SizeFilter::Range(min, max)),
                 _ => None,
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl BatchRandomRequest {
+    pub fn to_filters(&self) -> ImageFilters {
+        ImageFilters {
+            tags: Some(self.tags.clone()),
+            width: Self::parse_dimension(self.width, self.width_min, self.width_max),
+            height: Self::parse_dimension(self.height, self.height_min, self.height_max),
+            size: Self::parse_size(self.size, self.size_min, self.size_max),
+        }
+    }
+
+    fn parse_dimension(
+        exact: Option<u32>,
+        min: Option<u32>,
+        max: Option<u32>,
+    ) -> Option<DimensionFilter> {
+        if let Some(exact) = exact {
+            Some(DimensionFilter::Exact(exact))
+        } else if let (Some(min), Some(max)) = (min, max) {
+            if min <= max {
+                Some(DimensionFilter::Range(min, max))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn parse_size(exact: Option<u64>, min: Option<u64>, max: Option<u64>) -> Option<SizeFilter> {
+        if let Some(exact) = exact {
+            Some(SizeFilter::Exact(exact))
+        } else if let (Some(min), Some(max)) = (min, max) {
+            if min <= max {
+                Some(SizeFilter::Range(min, max))
+            } else {
+                None
             }
         } else {
             None

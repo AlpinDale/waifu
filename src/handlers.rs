@@ -3,8 +3,7 @@ use crate::error::ImageError;
 use crate::models::ApiKey;
 use crate::models::{
     AddImageRequest, BatchAddImageRequest, BatchImageResponse, BatchRandomRequest,
-    GenerateApiKeyRequest, ImageFilters, RemoveApiKeyRequest, UpdateApiKeyRequest,
-    UpdateApiKeyStatusRequest,
+    GenerateApiKeyRequest, RemoveApiKeyRequest, UpdateApiKeyRequest, UpdateApiKeyStatusRequest,
 };
 use crate::store::ImageStore;
 use futures_util::future::join_all;
@@ -17,37 +16,32 @@ pub async fn get_random_image_handler(
     cache: ImageCache,
     params: std::collections::HashMap<String, String>,
     _headers: HeaderMap,
-    _: (),
+    _auth_info: ApiKey,
 ) -> Result<impl Reply, Rejection> {
-    let filters = ImageFilters::from_query(&params);
+    let request = BatchRandomRequest {
+        count: 1,
+        tags: params
+            .get("tags")
+            .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
+            .unwrap_or_default(),
+        width: params.get("width").and_then(|w| w.parse().ok()),
+        width_min: params.get("width_min").and_then(|w| w.parse().ok()),
+        width_max: params.get("width_max").and_then(|w| w.parse().ok()),
+        height: params.get("height").and_then(|w| w.parse().ok()),
+        height_min: params.get("height_min").and_then(|w| w.parse().ok()),
+        height_max: params.get("height_max").and_then(|w| w.parse().ok()),
+        size: params.get("size").and_then(|w| w.parse().ok()),
+        size_min: params.get("size_min").and_then(|w| w.parse().ok()),
+        size_max: params.get("size_max").and_then(|w| w.parse().ok()),
+    };
 
+    let filters = request.to_filters();
     match store.get_random_image_with_filters(&filters) {
-        Ok(response) => {
-            info!(
-                "Retrieved random image: {} ({}x{} pixels, {} bytes)",
-                response.filename, response.width, response.height, response.size_bytes
-            );
-            cache
-                .insert(response.filename.clone(), response.clone())
-                .await;
-            Ok(warp::reply::json(&response))
+        Ok(image) => {
+            cache.insert(image.filename.clone(), image.clone()).await;
+            Ok(warp::reply::json(&image))
         }
-        Err(e) => {
-            error!("Failed to get random image: {}", e);
-            if e.to_string().contains("no such column") {
-                Err(warp::reject::custom(ImageError::DatabaseError(
-                    "Database schema is not up to date".to_string(),
-                )))
-            } else if e.to_string().contains("Query returned no rows") {
-                Err(warp::reject::custom(ImageError::PathNotFound(
-                    "No images found matching the specified criteria".to_string(),
-                )))
-            } else {
-                Err(warp::reject::custom(ImageError::DatabaseError(
-                    e.to_string(),
-                )))
-            }
-        }
+        Err(_) => Err(warp::reject::not_found()),
     }
 }
 
@@ -412,7 +406,6 @@ pub async fn get_all_tags_handler(
 pub async fn batch_random_images_handler(
     store: ImageStore,
     cache: ImageCache,
-    params: std::collections::HashMap<String, String>,
     _headers: HeaderMap,
     auth_info: ApiKey,
     body: BatchRandomRequest,
@@ -424,7 +417,7 @@ pub async fn batch_random_images_handler(
         )));
     }
 
-    let filters = ImageFilters::from_query(&params);
+    let filters = body.to_filters();
     let mut images = Vec::new();
     let mut errors = Vec::new();
 

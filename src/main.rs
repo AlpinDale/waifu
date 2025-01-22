@@ -82,20 +82,19 @@ async fn main() -> Result<()> {
         }))
     });
 
-    let random = warp::path("random")
+    let random_get = warp::path("random")
         .and(warp::get())
         .and(store.clone())
         .and(cache.clone())
         .and(warp::query::<std::collections::HashMap<String, String>>())
         .and(warp::filters::header::headers_cloned())
-        .and(auth.require_auth())
+        .and(auth.require_auth_info())
         .and_then(handlers::get_random_image_handler);
 
-    let batch_random = warp::path("random")
+    let random_post = warp::path("random")
         .and(warp::post())
         .and(store.clone())
         .and(cache.clone())
-        .and(warp::query::<std::collections::HashMap<String, String>>())
         .and(warp::filters::header::headers_cloned())
         .and(auth.require_auth_info())
         .and(warp::body::json())
@@ -201,8 +200,8 @@ async fn main() -> Result<()> {
         .and_then(handlers::update_api_key_status_handler);
 
     let api = health
-        .or(random)
-        .or(batch_random)
+        .or(random_get)
+        .or(random_post)
         .or(add_image)
         .or(batch_add_images)
         .or(remove_image)

@@ -964,6 +964,7 @@ impl ImageStore {
         let mut hasher = Sha256::new();
         hasher.update(data);
         let hash = format!("{:x}", hasher.finalize());
+        let short_hash = &hash[..8]; // Take only first 8 characters
 
         let ext = match content_type {
             "image/jpeg" => "jpg",
@@ -974,7 +975,7 @@ impl ImageStore {
             _ => return Err(anyhow!("Unsupported image format")),
         };
 
-        let new_filename = format!("{}.{}", hash, ext);
+        let new_filename = format!("{}.{}", short_hash, ext);
         let file_path = self.images_dir.join(&new_filename);
 
         if file_path.exists() {
@@ -997,7 +998,7 @@ impl ImageStore {
             "INSERT INTO images (hash, filename, created_at, modified_at, width, height, size_bytes) 
              VALUES (?, ?, ?, ?, ?, ?, ?)",
             params![
-                hash,
+                short_hash,
                 new_filename,
                 now,
                 now,
@@ -1007,7 +1008,11 @@ impl ImageStore {
             ],
         )?;
 
-        Ok(hash)
+        Ok(short_hash.to_string())
+    }
+
+    pub fn get_base_url(&self) -> String {
+        self.base_url.clone()
     }
 }
 

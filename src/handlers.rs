@@ -627,11 +627,24 @@ pub async fn upload_image_handler(
         Ok(hash) => match store.add_tags(&hash, &tags) {
             Ok(_) => {
                 info!("Successfully added image with tags: {:?}", tags);
+
+                let ext = match content_type.as_str() {
+                    "image/jpeg" => "jpg",
+                    "image/png" => "png",
+                    "image/gif" => "gif",
+                    "image/webp" => "webp",
+                    "image/bmp" | "image/x-ms-bmp" => "bmp",
+                    _ => "bin",
+                };
+
+                let url = format!("{}/images/{}.{}", store.get_base_url(), hash, ext);
+
                 Ok(warp::reply::with_status(
                     warp::reply::json(&json!({
                         "message": "Image uploaded successfully",
                         "hash": hash,
-                        "tags": tags
+                        "tags": tags,
+                        "url": url
                     })),
                     warp::http::StatusCode::CREATED,
                 ))

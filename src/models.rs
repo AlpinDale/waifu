@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -224,4 +225,12 @@ impl BatchRandomRequest {
             None
         }
     }
+}
+
+#[derive(Debug)]
+pub struct FileUpload {
+    pub filename: String,
+    pub content_type: String,
+    pub data: Bytes,
+    pub tags: Vec<String>,
 }

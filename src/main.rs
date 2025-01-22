@@ -24,6 +24,7 @@ use time::Duration;
 use tracing::info;
 use warp::cors::Cors;
 use warp::http::HeaderMap;
+use warp::multipart::form;
 use warp::Filter;
 
 #[tokio::main]
@@ -199,6 +200,13 @@ async fn main() -> Result<()> {
         .and(warp::body::json())
         .and_then(handlers::update_api_key_status_handler);
 
+    let upload = warp::path("upload")
+        .and(warp::post())
+        .and(form().max_length(10 * 1024 * 1024)) // 10MB limit
+        .and(store.clone())
+        .and(auth.require_auth())
+        .and_then(handlers::upload_image_handler);
+
     let api = health
         .or(random_get)
         .or(random_post)
@@ -213,6 +221,7 @@ async fn main() -> Result<()> {
         .or(api_key_routes)
         .or(update_api_key)
         .or(update_api_key_status)
+        .or(upload)
         .or(warp::options()
             .and(warp::path::full())
             .map(|_| warp::reply()))

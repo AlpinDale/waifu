@@ -320,3 +320,42 @@ pub async fn remove_image_tags_handler(
         }
     }
 }
+
+pub async fn add_image_tags_handler(
+    filename: String,
+    store: ImageStore,
+    tags: Vec<String>,
+    _: (), // Admin auth result
+) -> Result<impl Reply, Rejection> {
+    if tags.is_empty() {
+        error!("Attempt to add empty tags list");
+        return Err(warp::reject::custom(ImageError::MissingTags));
+    }
+
+    let image = match store.get_image_by_filename(&filename) {
+        Ok(img) => img,
+        Err(e) => {
+            error!("Failed to get image {}: {}", filename, e);
+            return Err(warp::reject::not_found());
+        }
+    };
+
+    match store.add_tags(&image.hash, &tags) {
+        Ok(()) => {
+            info!("Successfully added tags {:?} to image: {}", tags, filename);
+            Ok(warp::reply::with_status(
+                warp::reply::json(&serde_json::json!({
+                    "message": format!("Tags added successfully to image '{}'", filename),
+                    "added_tags": tags
+                })),
+                warp::http::StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            error!("Failed to add tags to image {}: {}", filename, e);
+            Err(warp::reject::custom(ImageError::DatabaseError(
+                e.to_string(),
+            )))
+        }
+    }
+}

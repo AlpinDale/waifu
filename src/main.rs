@@ -127,6 +127,13 @@ async fn main() -> Result<()> {
         .and(auth.require_admin())
         .and_then(handlers::remove_image_tags_handler);
 
+    let add_image_tags = warp::path!("images" / String / "tags")
+        .and(warp::post())
+        .and(store.clone())
+        .and(warp::body::json())
+        .and(auth.require_admin())
+        .and_then(handlers::add_image_tags_handler);
+
     let images = warp::path("images").and(warp::fs::dir("images"));
 
     let image = warp::path!("images" / String)
@@ -188,6 +195,7 @@ async fn main() -> Result<()> {
         .or(add_image)
         .or(remove_image)
         .or(remove_image_tags)
+        .or(add_image_tags)
         .or(images)
         .or(image)
         .or(api_key_routes)

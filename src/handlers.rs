@@ -6,9 +6,12 @@ use crate::models::{
     GenerateApiKeyRequest, RemoveApiKeyRequest, UpdateApiKeyRequest, UpdateApiKeyStatusRequest,
 };
 use crate::store::ImageStore;
+use bytes::{Buf, Bytes};
 use futures_util::future::join_all;
+use futures_util::TryStreamExt;
 use serde_json::json;
-use tracing::{error, info};
+use tracing::{error, info, warn};
+use warp::multipart::{FormData, Part};
 use warp::{http::HeaderMap, Rejection, Reply};
 
 pub async fn get_random_image_handler(
@@ -539,4 +542,119 @@ pub async fn batch_add_images_handler(
         warp::reply::json(&response),
         warp::http::StatusCode::CREATED,
     ))
+}
+
+pub async fn upload_image_handler(
+    form: FormData,
+    store: ImageStore,
+    _: (), // Auth result
+) -> Result<impl Reply, Rejection> {
+    let mut tags: Vec<String> = Vec::new();
+    let mut file_data: Option<(String, String, Bytes)> = None;
+
+    let parts: Result<Vec<Part>, warp::Error> = form.try_collect().await;
+    let parts = parts.map_err(|e| {
+        error!("Failed to collect multipart form: {}", e);
+        warp::reject::custom(ImageError::InvalidImage(e.to_string()))
+    })?;
+
+    for mut part in parts {
+        match part.name() {
+            "file" => {
+                let content_type = part.content_type().unwrap_or("").to_string();
+                if !content_type.starts_with("image/") {
+                    return Err(warp::reject::custom(ImageError::InvalidImage(
+                        "Invalid content type".to_string(),
+                    )));
+                }
+
+                let filename = part.filename().unwrap_or("unnamed.bin").to_string();
+                let data = part
+                    .stream()
+                    .try_fold(Vec::new(), |mut vec, data| async move {
+                        vec.extend_from_slice(&data.chunk());
+                        Ok(vec)
+                    })
+                    .await
+                    .map_err(|e| {
+                        error!("Failed to read file data: {}", e);
+                        warp::reject::custom(ImageError::InvalidImage(e.to_string()))
+                    })?;
+
+                file_data = Some((filename, content_type, data.into()));
+            }
+            "tags" => {
+                let data = part
+                    .data()
+                    .await
+                    .ok_or_else(|| {
+                        warp::reject::custom(ImageError::InvalidImage(
+                            "Missing tags data".to_string(),
+                        ))
+                    })?
+                    .map_err(|e| {
+                        error!("Failed to read tags data: {}", e);
+                        warp::reject::custom(ImageError::InvalidImage(e.to_string()))
+                    })?;
+
+                let tag_data = data.chunk().to_vec();
+                let tag_str = String::from_utf8(tag_data).map_err(|e| {
+                    error!("Failed to parse tags as UTF-8: {}", e);
+                    warp::reject::custom(ImageError::InvalidImage(e.to_string()))
+                })?;
+
+                tags = serde_json::from_str(&tag_str).map_err(|e| {
+                    error!("Failed to parse tags JSON: {}", e);
+                    warp::reject::custom(ImageError::InvalidImage(e.to_string()))
+                })?;
+            }
+            _ => {
+                warn!("Unexpected form field: {}", part.name());
+            }
+        }
+    }
+
+    let (filename, content_type, data) = file_data.ok_or_else(|| {
+        warp::reject::custom(ImageError::InvalidImage("No file provided".to_string()))
+    })?;
+
+    if tags.is_empty() {
+        return Err(warp::reject::custom(ImageError::MissingTags));
+    }
+
+    info!(
+        "Processing file upload: {} ({} bytes) with tags: {:?}",
+        filename,
+        data.len(),
+        tags
+    );
+
+    match store.add_image_data(&data, &filename, &content_type).await {
+        Ok(hash) => match store.add_tags(&hash, &tags) {
+            Ok(_) => {
+                info!("Successfully added image with tags: {:?}", tags);
+                Ok(warp::reply::with_status(
+                    warp::reply::json(&json!({
+                        "message": "Image uploaded successfully",
+                        "hash": hash,
+                        "tags": tags
+                    })),
+                    warp::http::StatusCode::CREATED,
+                ))
+            }
+            Err(e) => {
+                error!("Failed to add tags: {}", e);
+                Err(warp::reject::custom(ImageError::DatabaseError(format!(
+                    "Failed to add tags: {}",
+                    e
+                ))))
+            }
+        },
+        Err(e) => {
+            error!("Failed to add image: {}", e);
+            Err(warp::reject::custom(ImageError::InvalidImage(
+                e.to_string(),
+            )))
+        }
+    }
 }

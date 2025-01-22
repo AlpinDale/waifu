@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::models::{ApiKey, DimensionFilter, ImageFilters, ImageResponse, PathType, SizeFilter};
 use anyhow::{anyhow, Result};
+use bytes::Bytes;
 use futures_util::StreamExt;
 use image::{GenericImageView, ImageFormat};
 use r2d2::Pool;
@@ -948,6 +949,65 @@ impl ImageStore {
                 .format(&Rfc3339)
                 .unwrap_or_else(|_| "".to_string()),
         })
+    }
+
+    pub async fn add_image_data(
+        &self,
+        data: &Bytes,
+        _filename: &str,
+        content_type: &str,
+    ) -> Result<String> {
+        if !ALLOWED_CONTENT_TYPES.contains(&content_type) {
+            return Err(anyhow!("Unsupported content type: {}", content_type));
+        }
+
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        let hash = format!("{:x}", hasher.finalize());
+
+        let ext = match content_type {
+            "image/jpeg" => "jpg",
+            "image/png" => "png",
+            "image/gif" => "gif",
+            "image/webp" => "webp",
+            "image/bmp" | "image/x-ms-bmp" => "bmp",
+            _ => return Err(anyhow!("Unsupported image format")),
+        };
+
+        let new_filename = format!("{}.{}", hash, ext);
+        let file_path = self.images_dir.join(&new_filename);
+
+        if file_path.exists() {
+            return Err(anyhow!("Image already exists: {}", new_filename));
+        }
+
+        // Verify it's a valid image
+        let img = image::load_from_memory(data).map_err(|e| anyhow!("Invalid image: {}", e))?;
+
+        let dimensions = img.dimensions();
+
+        // Save the file
+        let mut file = tokio::fs::File::create(&file_path).await?;
+        file.write_all(data).await?;
+
+        let now = OffsetDateTime::now_utc().format(&Rfc3339)?;
+
+        let conn = self.pool.get()?;
+        conn.execute(
+            "INSERT INTO images (hash, filename, created_at, modified_at, width, height, size_bytes) 
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params![
+                hash,
+                new_filename,
+                now,
+                now,
+                dimensions.0 as i64,
+                dimensions.1 as i64,
+                data.len() as i64
+            ],
+        )?;
+
+        Ok(hash)
     }
 }
 

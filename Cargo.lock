@@ -2395,6 +2395,7 @@ name = "waifu"
 version = "0.0.2"
 dependencies = [
  "anyhow",
+ "bytes",
  "chrono",
  "clap",
  "dashmap",

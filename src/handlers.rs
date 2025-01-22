@@ -637,7 +637,7 @@ pub async fn upload_image_handler(
                     _ => "bin",
                 };
 
-                let url = format!("{}/images/{}.{}", store.get_base_url(), hash, ext);
+                let url = format!("{}/{}.{}", store.get_base_url(), hash, ext);
 
                 Ok(warp::reply::with_status(
                     warp::reply::json(&json!({

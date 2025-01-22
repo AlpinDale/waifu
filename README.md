@@ -125,7 +125,7 @@ If you use this software in your research, please cite:
 
 ```bibtex
 @software{waifu_api_2024,
-  author = {Your Name},
+  author = {AlpinDale},
   title = {Waifu: High-Performance Image Management System},
   year = {2025},
   url = {https://github.com/AlpinDale/waifu}

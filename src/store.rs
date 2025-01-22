@@ -89,6 +89,27 @@ impl ImageStore {
             [],
         )?;
 
+        // Create tags table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE
+            )",
+            [],
+        )?;
+
+        // Create image_tags junction table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS image_tags (
+                image_hash TEXT NOT NULL,
+                tag_id INTEGER NOT NULL,
+                PRIMARY KEY (image_hash, tag_id),
+                FOREIGN KEY (image_hash) REFERENCES images(hash),
+                FOREIGN KEY (tag_id) REFERENCES tags(id)
+            )",
+            [],
+        )?;
+
         // First create the api_keys table if it doesn't exist
         conn.execute(
             "CREATE TABLE IF NOT EXISTS api_keys (
@@ -176,6 +197,7 @@ impl ImageStore {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )?;
 
+        let tags = self.get_image_tags(&hash)?;
         let file_path = self.images_dir.join(&filename);
 
         let metadata = std::fs::metadata(&file_path)?;
@@ -197,6 +219,7 @@ impl ImageStore {
             height: dimensions.1,
             size_bytes: metadata.len(),
             hash,
+            tags,
             created_at: OffsetDateTime::parse(&created_at, &Rfc3339)?,
             modified_at: OffsetDateTime::parse(&modified_at, &Rfc3339)?,
         })
@@ -494,6 +517,7 @@ impl ImageStore {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
 
+        let tags = self.get_image_tags(&hash)?;
         let file_path = self.images_dir.join(filename);
 
         let metadata = std::fs::metadata(&file_path)?;
@@ -515,6 +539,7 @@ impl ImageStore {
             height: dimensions.1,
             size_bytes: metadata.len(),
             hash,
+            tags,
             created_at: OffsetDateTime::parse(&created_at, &Rfc3339)?,
             modified_at: OffsetDateTime::parse(&modified_at, &Rfc3339)?,
         })
@@ -674,6 +699,79 @@ impl ImageStore {
         }
 
         Ok(())
+    }
+
+    pub fn add_tags(&self, image_hash: &str, tags: &[String]) -> Result<()> {
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction()?;
+
+        for tag in tags {
+            let tag = tag.to_lowercase().replace(' ', "_");
+
+            tx.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", [&tag])?;
+
+            let tag_id: i64 =
+                tx.query_row("SELECT id FROM tags WHERE name = ?", [&tag], |row| {
+                    row.get(0)
+                })?;
+
+            tx.execute(
+                "INSERT OR IGNORE INTO image_tags (image_hash, tag_id) VALUES (?, ?)",
+                params![image_hash, tag_id],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn remove_tags(&self, image_hash: &str, tags: &[String]) -> Result<()> {
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction()?;
+
+        for tag in tags {
+            let tag = tag.to_lowercase().replace(' ', "_");
+
+            if let Ok(tag_id) = tx.query_row("SELECT id FROM tags WHERE name = ?", [&tag], |row| {
+                row.get::<_, i64>(0)
+            }) {
+                tx.execute(
+                    "DELETE FROM image_tags WHERE image_hash = ? AND tag_id = ?",
+                    params![image_hash, tag_id],
+                )?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_image_tags(&self, image_hash: &str) -> Result<Vec<String>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(
+            "SELECT t.name 
+             FROM tags t 
+             JOIN image_tags it ON t.id = it.tag_id 
+             WHERE it.image_hash = ?
+             ORDER BY t.name",
+        )?;
+
+        let tags = stmt
+            .query_map([image_hash], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(tags)
+    }
+
+    pub fn get_all_tags(&self) -> Result<Vec<String>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare("SELECT name FROM tags ORDER BY name")?;
+
+        let tags = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(tags)
     }
 }
 

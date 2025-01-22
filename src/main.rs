@@ -99,13 +99,19 @@ async fn main() -> Result<()> {
 
     let add_image = warp::path("image")
         .and(warp::post())
-        .and(store.clone())
         .and(warp::body::json())
+        .and(store.clone())
         .and(auth.require_auth())
-        .map(|store, body, ()| (store, body))
+        .map(|body, store, ()| (store, body))
         .and_then(|args: (ImageStore, AddImageRequest)| async move {
             handlers::add_image_handler(args.0, args.1).await
         });
+
+    let remove_image = warp::path!("images" / String)
+        .and(warp::delete())
+        .and(store.clone())
+        .and(auth.require_admin())
+        .and_then(handlers::remove_image_handler);
 
     let images = warp::path("images").and(warp::fs::dir("images"));
 
@@ -159,6 +165,7 @@ async fn main() -> Result<()> {
     let api = health
         .or(random)
         .or(add_image)
+        .or(remove_image)
         .or(images)
         .or(image)
         .or(api_key_routes)

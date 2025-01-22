@@ -10,6 +10,7 @@ pub struct ImageResponse {
     pub height: u32,
     pub size_bytes: u64,
     pub hash: String,
+    pub tags: Vec<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
@@ -21,6 +22,7 @@ pub struct AddImageRequest {
     pub path: String,
     #[serde(rename = "type")]
     pub path_type: PathType,
+    pub tags: Vec<String>,
 }
 
 #[derive(Deserialize)]

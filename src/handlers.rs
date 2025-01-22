@@ -35,12 +35,34 @@ pub async fn add_image_handler(
     store: ImageStore,
     body: AddImageRequest,
 ) -> Result<impl Reply, Rejection> {
-    info!("Adding new image from {}", body.path);
+    if body.tags.is_empty() {
+        error!("Attempt to upload image without tags");
+        return Err(warp::reject::custom(ImageError::MissingTags));
+    }
+
+    info!(
+        "Adding new image from {} with tags: {:?}",
+        body.path, body.tags
+    );
     match store.add_image(&body.path, body.path_type).await {
-        Ok(_) => {
+        Ok(hash) => {
+            match store.add_tags(&hash, &body.tags) {
+                Ok(_) => info!("Successfully added tags: {:?}", body.tags),
+                Err(e) => {
+                    error!("Failed to add tags: {}", e);
+                    return Err(warp::reject::custom(ImageError::DatabaseError(format!(
+                        "Failed to add tags: {}",
+                        e
+                    ))));
+                }
+            }
             info!("Successfully added image from {}", body.path);
             Ok(warp::reply::with_status(
-                "Image added successfully",
+                warp::reply::json(&json!({
+                    "message": "Image added successfully",
+                    "hash": hash,
+                    "tags": body.tags
+                })),
                 warp::http::StatusCode::CREATED,
             ))
         }
@@ -54,7 +76,10 @@ pub async fn add_image_handler(
                 || e.to_string().contains("Unsupported image format")
             {
                 ImageError::InvalidImage(e.to_string())
+            } else if e.to_string().contains("already exists") {
+                ImageError::DuplicateImage(e.to_string())
             } else {
+                error!("Unexpected error: {}", e);
                 ImageError::DatabaseError(e.to_string())
             };
             Err(warp::reject::custom(err))
@@ -184,6 +209,30 @@ pub async fn update_api_key_handler(
         }
         Err(e) => {
             error!("Failed to update API key: {}", e);
+            Err(warp::reject::custom(ImageError::DatabaseError(
+                e.to_string(),
+            )))
+        }
+    }
+}
+
+pub async fn remove_image_handler(
+    filename: String,
+    store: ImageStore,
+    _: (), // Admin auth result
+) -> Result<impl Reply, Rejection> {
+    match store.remove_image(&filename) {
+        Ok(()) => {
+            info!("Successfully removed image: {}", filename);
+            Ok(warp::reply::with_status(
+                warp::reply::json(&json!({
+                    "message": format!("Image '{}' was successfully removed", filename)
+                })),
+                warp::http::StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            error!("Failed to remove image {}: {}", filename, e);
             Err(warp::reject::custom(ImageError::DatabaseError(
                 e.to_string(),
             )))

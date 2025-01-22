@@ -11,7 +11,7 @@ use futures_util::future::join_all;
 use futures_util::TryStreamExt;
 use serde_json::json;
 use tracing::{error, info, warn};
-use warp::multipart::{FormData, Part};
+use warp::multipart::FormData;
 use warp::{http::HeaderMap, Rejection, Reply};
 
 pub async fn get_random_image_handler(
@@ -545,20 +545,14 @@ pub async fn batch_add_images_handler(
 }
 
 pub async fn upload_image_handler(
-    form: FormData,
+    mut form: FormData,
     store: ImageStore,
     _: (), // Auth result
 ) -> Result<impl Reply, Rejection> {
     let mut tags: Vec<String> = Vec::new();
     let mut file_data: Option<(String, String, Bytes)> = None;
 
-    let parts: Result<Vec<Part>, warp::Error> = form.try_collect().await;
-    let parts = parts.map_err(|e| {
-        error!("Failed to collect multipart form: {}", e);
-        warp::reject::custom(ImageError::InvalidImage(e.to_string()))
-    })?;
-
-    for mut part in parts {
+    while let Ok(Some(mut part)) = form.try_next().await {
         match part.name() {
             "file" => {
                 let content_type = part.content_type().unwrap_or("").to_string();

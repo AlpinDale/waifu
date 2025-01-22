@@ -14,6 +14,9 @@ pub struct Config {
     #[arg(long, env = "IMAGES_PATH", default_value = "/images")]
     pub images_path: String,
 
+    #[arg(long, env = "BASE_URL")]
+    pub base_url: Option<String>,
+
     #[arg(long, env = "RATE_LIMIT_REQUESTS", default_value = "2")]
     pub rate_limit_requests: u32,
 
@@ -41,5 +44,11 @@ impl Config {
 
     pub fn cache_ttl(&self) -> Duration {
         Duration::from_secs(self.cache_ttl_secs)
+    }
+
+    pub fn get_base_url(&self) -> String {
+        self.base_url
+            .clone()
+            .unwrap_or_else(|| format!("http://{}:{}", self.host, self.port))
     }
 }

@@ -42,13 +42,7 @@ async fn main() -> Result<()> {
     let images_dir = PathBuf::from("images");
 
     info!("Initializing image store...");
-    let store = store::ImageStore::new(
-        "images.db",
-        images_dir.clone(),
-        config.host.clone(),
-        config.port,
-        config.images_path.clone(),
-    )?;
+    let store = store::ImageStore::new("images.db", images_dir.clone(), &config)?;
 
     let rate_limiter = ApiKeyRateLimiter::new(
         store.clone(),

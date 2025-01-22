@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::models::{ApiKey, ImageResponse, PathType};
 use anyhow::{anyhow, Result};
 use futures_util::StreamExt;
@@ -62,13 +63,7 @@ pub struct ImageStore {
 }
 
 impl ImageStore {
-    pub fn new(
-        db_path: &str,
-        images_dir: PathBuf,
-        host: String,
-        port: u16,
-        images_path: String,
-    ) -> Result<Self> {
+    pub fn new(db_path: &str, images_dir: PathBuf, config: &Config) -> Result<Self> {
         info!("Initializing ImageStore with database at {}", db_path);
         let manager = SqliteConnectionManager::file(db_path);
         let pool = Pool::new(manager)?;
@@ -137,10 +132,12 @@ impl ImageStore {
             )?;
         }
 
+        let base_url = format!("{}/images", config.get_base_url());
+
         let store = Self {
             pool,
             images_dir,
-            base_url: format!("http://{}:{}{}", host, port, images_path),
+            base_url,
         };
 
         info!("Syncing database with existing images...");

@@ -4,7 +4,7 @@ use futures_util::StreamExt;
 use image::{GenericImageView, ImageFormat};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::{params, Error as SqliteError};
+use rusqlite::{params, Error as SqliteError, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::PathBuf;
@@ -641,13 +641,19 @@ impl ImageStore {
 
     pub fn validate_api_key(&self, key: &str) -> Result<bool> {
         let conn = self.pool.get()?;
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM api_keys WHERE key = ? AND is_active = 1",
-            [key],
-            |row| row.get(0),
-        )?;
+        let result: Option<bool> = conn
+            .query_row(
+                "SELECT is_active FROM api_keys WHERE key = ?",
+                [key],
+                |row| row.get(0),
+            )
+            .optional()?;
 
-        Ok(count > 0)
+        match result {
+            Some(true) => Ok(true),
+            Some(false) => Err(anyhow!("inactive_key")),
+            None => Ok(false),
+        }
     }
 
     pub fn get_api_key(&self, key: &str) -> Result<ApiKey> {
@@ -822,6 +828,21 @@ impl ImageStore {
 
         if file_path.exists() {
             std::fs::remove_file(file_path)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn update_api_key_status(&self, username: &str, is_active: bool) -> Result<()> {
+        let conn = self.pool.get()?;
+
+        let rows_affected = conn.execute(
+            "UPDATE api_keys SET is_active = ? WHERE username = ?",
+            params![is_active, username],
+        )?;
+
+        if rows_affected == 0 {
+            return Err(anyhow!("No API key found for username: {}", username));
         }
 
         Ok(())

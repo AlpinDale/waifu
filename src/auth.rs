@@ -54,6 +54,9 @@ impl Auth {
                 match self.store.validate_api_key(key) {
                     Ok(true) => Ok(()),
                     Ok(false) => Err(warp::reject::custom(ImageError::Unauthorized)),
+                    Err(e) if e.to_string().contains("inactive_key") => {
+                        Err(warp::reject::custom(ImageError::InactiveKey))
+                    }
                     Err(_) => Err(warp::reject::custom(ImageError::Unauthorized)),
                 }
             }

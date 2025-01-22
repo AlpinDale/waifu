@@ -11,6 +11,7 @@ pub enum ImageError {
     RateLimitExceeded,
     UsernameExists(String),
     Unauthorized,
+    InactiveKey,
     UsernameNotFound(String),
     DuplicateImage(String),
     MissingTags,
@@ -72,6 +73,10 @@ pub async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert
             ImageError::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 "Invalid or missing API key".to_string(),
+            ),
+            ImageError::InactiveKey => (
+                StatusCode::UNAUTHORIZED,
+                "This API key has been deactivated. Please contact the administrator.".to_string(),
             ),
             ImageError::UsernameNotFound(_) => (
                 StatusCode::NOT_FOUND,

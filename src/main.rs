@@ -162,6 +162,13 @@ async fn main() -> Result<()> {
         .and(warp::body::json())
         .and_then(handlers::update_api_key_handler);
 
+    let update_api_key_status = warp::path!("api-keys" / String / "status")
+        .and(warp::patch())
+        .and(auth.require_admin())
+        .and(store.clone())
+        .and(warp::body::json())
+        .and_then(handlers::update_api_key_status_handler);
+
     let api = health
         .or(random)
         .or(add_image)
@@ -170,6 +177,7 @@ async fn main() -> Result<()> {
         .or(image)
         .or(api_key_routes)
         .or(update_api_key)
+        .or(update_api_key_status)
         .or(warp::options()
             .and(warp::path::full())
             .map(|_| warp::reply()))

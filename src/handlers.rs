@@ -2,6 +2,7 @@ use crate::cache::ImageCache;
 use crate::error::ImageError;
 use crate::models::{
     AddImageRequest, GenerateApiKeyRequest, RemoveApiKeyRequest, UpdateApiKeyRequest,
+    UpdateApiKeyStatusRequest,
 };
 use crate::store::ImageStore;
 use serde_json::json;
@@ -212,6 +213,41 @@ pub async fn update_api_key_handler(
             Err(warp::reject::custom(ImageError::DatabaseError(
                 e.to_string(),
             )))
+        }
+    }
+}
+
+pub async fn update_api_key_status_handler(
+    username: String,
+    _: (), // Admin auth result
+    store: ImageStore,
+    body: UpdateApiKeyStatusRequest,
+) -> Result<impl Reply, Rejection> {
+    match store.update_api_key_status(&username, body.is_active) {
+        Ok(()) => {
+            info!(
+                username = %username,
+                is_active = body.is_active,
+                "Updated API key status"
+            );
+            Ok(warp::reply::with_status(
+                warp::reply::json(&json!({
+                    "message": "API key status updated successfully",
+                    "username": username,
+                    "is_active": body.is_active
+                })),
+                warp::http::StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            error!("Failed to update API key status: {}", e);
+            if e.to_string().contains("No API key found") {
+                Err(warp::reject::custom(ImageError::UsernameNotFound(username)))
+            } else {
+                Err(warp::reject::custom(ImageError::DatabaseError(
+                    e.to_string(),
+                )))
+            }
         }
     }
 }

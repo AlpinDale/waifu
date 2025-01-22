@@ -59,3 +59,8 @@ pub struct ApiKey {
     pub is_active: bool,
     pub requests_per_second: Option<u32>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateApiKeyStatusRequest {
+    pub is_active: bool,
+}

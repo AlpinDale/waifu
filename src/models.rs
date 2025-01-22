@@ -70,12 +70,19 @@ pub struct ImageFilters {
     pub tags: Option<Vec<String>>,
     pub width: Option<DimensionFilter>,
     pub height: Option<DimensionFilter>,
+    pub size: Option<SizeFilter>,
 }
 
 #[derive(Debug)]
 pub enum DimensionFilter {
     Exact(u32),
     Range(u32, u32),
+}
+
+#[derive(Debug)]
+pub enum SizeFilter {
+    Exact(u64),
+    Range(u64, u64),
 }
 
 impl ImageFilters {
@@ -96,11 +103,17 @@ impl ImageFilters {
             params.get("height_min"),
             params.get("height_max"),
         );
+        let size = Self::parse_size(
+            params.get("size"),
+            params.get("size_min"),
+            params.get("size_max"),
+        );
 
         Self {
             tags,
             width,
             height,
+            size,
         }
     }
 
@@ -114,6 +127,23 @@ impl ImageFilters {
         } else if let (Some(min), Some(max)) = (min, max) {
             match (min.parse(), max.parse()) {
                 (Ok(min), Ok(max)) if min <= max => Some(DimensionFilter::Range(min, max)),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    fn parse_size(
+        exact: Option<&String>,
+        min: Option<&String>,
+        max: Option<&String>,
+    ) -> Option<SizeFilter> {
+        if let Some(exact) = exact {
+            exact.parse().ok().map(SizeFilter::Exact)
+        } else if let (Some(min), Some(max)) = (min, max) {
+            match (min.parse(), max.parse()) {
+                (Ok(min), Ok(max)) if min <= max => Some(SizeFilter::Range(min, max)),
                 _ => None,
             }
         } else {

@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::models::{ApiKey, DimensionFilter, ImageFilters, ImageResponse, PathType};
+use crate::models::{ApiKey, DimensionFilter, ImageFilters, ImageResponse, PathType, SizeFilter};
 use anyhow::{anyhow, Result};
 use futures_util::StreamExt;
 use image::{GenericImageView, ImageFormat};
@@ -81,7 +81,8 @@ impl ImageStore {
                 created_at TEXT NOT NULL,
                 modified_at TEXT NOT NULL,
                 width INTEGER,
-                height INTEGER
+                height INTEGER,
+                size_bytes INTEGER
             )",
             [],
         )?;
@@ -190,43 +191,6 @@ impl ImageStore {
         }
 
         Ok(format!("{:x}", hasher.finalize()))
-    }
-
-    pub fn get_random_image(&self) -> Result<ImageResponse> {
-        let conn = self.pool.get()?;
-        let (filename, hash, created_at, modified_at): (String, String, String, String) = conn
-            .query_row(
-            "SELECT filename, hash, created_at, modified_at FROM images ORDER BY RANDOM() LIMIT 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )?;
-
-        let tags = self.get_image_tags(&hash)?;
-        let file_path = self.images_dir.join(&filename);
-
-        let metadata = std::fs::metadata(&file_path)?;
-
-        let img = image::open(&file_path)?;
-        let dimensions = img.dimensions();
-
-        let format = file_path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_uppercase())
-            .unwrap_or_else(|| "UNKNOWN".to_string());
-
-        Ok(ImageResponse {
-            url: format!("{}/{}", self.base_url, filename),
-            filename,
-            format,
-            width: dimensions.0,
-            height: dimensions.1,
-            size_bytes: metadata.len(),
-            hash,
-            tags,
-            created_at: OffsetDateTime::parse(&created_at, &Rfc3339)?,
-            modified_at: OffsetDateTime::parse(&modified_at, &Rfc3339)?,
-        })
     }
 
     async fn validate_url(&self, url: &str) -> Result<Url> {
@@ -421,8 +385,8 @@ impl ImageStore {
 
                 let conn = self.pool.get()?;
                 conn.execute(
-                    "INSERT INTO images (filename, hash, created_at, modified_at, width, height) 
-                     VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO images (filename, hash, created_at, modified_at, width, height, size_bytes) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?)",
                     [
                         &filename,
                         &hash,
@@ -430,6 +394,7 @@ impl ImageStore {
                         &now_str,
                         &dimensions.0.to_string(),
                         &dimensions.1.to_string(),
+                        &metadata.len().to_string(),
                     ],
                 )?;
 
@@ -439,7 +404,6 @@ impl ImageStore {
                 info!("Processing URL: {}", path);
                 let temp_path = self.download_image(path).await?;
 
-                // Validate image format
                 info!("Checking image format...");
                 let format = image::io::Reader::new(std::io::BufReader::new(std::fs::File::open(
                     &temp_path,
@@ -484,6 +448,7 @@ impl ImageStore {
                     filename, dimensions.0, dimensions.1, format
                 );
 
+                let metadata = std::fs::metadata(&dest_path)?;
                 let now = OffsetDateTime::now_utc();
                 let now_str = now.format(&Rfc3339)?;
                 let hash = Self::calculate_file_hash(&dest_path)?;
@@ -492,8 +457,8 @@ impl ImageStore {
 
                 let conn = self.pool.get()?;
                 conn.execute(
-                    "INSERT INTO images (filename, hash, created_at, modified_at, width, height) 
-                     VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO images (filename, hash, created_at, modified_at, width, height, size_bytes) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?)",
                     [
                         &filename,
                         &hash,
@@ -501,6 +466,7 @@ impl ImageStore {
                         &now_str,
                         &dimensions.0.to_string(),
                         &dimensions.1.to_string(),
+                        &metadata.len().to_string(),
                     ],
                 )?;
 
@@ -879,6 +845,20 @@ impl ImageStore {
                 }
                 DimensionFilter::Range(min, max) => {
                     conditions.push("height BETWEEN ? AND ?".to_string());
+                    param_values.push(min.to_string());
+                    param_values.push(max.to_string());
+                }
+            }
+        }
+
+        if let Some(size_filter) = &filters.size {
+            match size_filter {
+                SizeFilter::Exact(s) => {
+                    conditions.push("size_bytes = ?".to_string());
+                    param_values.push(s.to_string());
+                }
+                SizeFilter::Range(min, max) => {
+                    conditions.push("size_bytes BETWEEN ? AND ?".to_string());
                     param_values.push(min.to_string());
                     param_values.push(max.to_string());
                 }
